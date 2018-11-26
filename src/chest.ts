@@ -1,13 +1,12 @@
 import * as path from 'path'
 import * as Docker from 'dockerode'
-import { Transform } from 'stream';
 
 const d = new Docker()
 const BORG_IMAGE = 'ceymard/borg'
 
 async function setupLogging(cont: Docker.Container) {
 
-  const stream = await cont.logs({stdout: true, stderr: false, follow: true})
+  const stream = await cont.logs({stdout: true, stderr: true, follow: true})
   cont.modem.demuxStream(stream, process.stdout, process.stderr)
 }
 
