@@ -7,15 +7,8 @@ const BORG_IMAGE = 'ceymard/borg'
 
 async function setupLogging(cont: Docker.Container) {
 
-  const logstream = new Transform({
-    transform(ch: Buffer, encoding, cb) {
-      cb(undefined, ch.toString('utf-8'))
-    }
-  })
-  const stream = await cont.logs({stdout: true, stderr: true, follow: true})
-  cont.modem.demuxStream(stream, logstream, logstream)
-  stream.pipe(process.stdout)
-  // stream.pipe(logstream).pipe(process.stdout)
+  const stream = await cont.logs({stdout: true, stderr: false, follow: true})
+  cont.modem.demuxStream(stream, process.stdout, process.stderr)
 }
 
 /**
