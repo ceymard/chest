@@ -1,0 +1,9 @@
+{
+  "name": "chest",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@types/dockerode": "^2.5.9",
+    "dockerode": "^2.5.7"
+  }
+}
