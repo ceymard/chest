@@ -13,17 +13,13 @@ async function setupLogging(cont: Docker.Container) {
 /**
  * Backup a container
  */
-async function backup(id: string, args: string[]) {
+async function runBorgOnContainer(id: string, dir: string, args: string[]) {
   const cont = await d.getContainer(id)
   const infos = await cont.inspect()
   const CONT_WAS_RUNNING = !!infos.State.Running
 
-  var IS_REPO = false
   var IS_DATA = false
   args = args.map(a => {
-    if (a.indexOf('%repo') > -1) {
-      IS_REPO = true
-    }
     if (a.indexOf('%data') > -1) {
       IS_DATA = true
     }
@@ -34,9 +30,7 @@ async function backup(id: string, args: string[]) {
   const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:ro`)
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
-  binds.push(`${path.join(process.env.HOME!, '.chest/backups/', infos.Name.replace(/^.*\//, ''))}:/repository:rw`)
-
-  if (IS_REPO) { }
+  binds.push(`${dir}:/repository:rw`)
 
   var borg!: Docker.Container
   try {
@@ -84,5 +78,25 @@ async function backup(id: string, args: string[]) {
 
 }
 
-const args = process.argv.slice(2)
-backup(args[0], args.slice(1)).catch(e => console.error(e))
+
+function usage() {
+  console.log(`usage: chest <container> <backup|restore|exec|list> [arguments]`)
+  process.exit(1)
+}
+
+const [contdesc, command, ...args] = process.argv.slice(2)
+if (!command) {
+  usage()
+}
+var [container, dir] = contdesc.split(':')
+dir = dir || path.join(process.env.HOME!, '.chest/backups/', container.replace(/^.*\//, ''))
+
+if (command === 'exec') {
+  runBorgOnContainer(container, dir, args).catch(e => console.error(e))
+} else if (command === 'backup') {
+  const now = (new Date()).toJSON()
+  runBorgOnContainer(container, dir, ['init', '-e', 'none', '%repo'])
+  runBorgOnContainer(container, dir, ['create', '--stats', `%repo::${now}`, '%data'])
+} else {
+  usage()
+}
