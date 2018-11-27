@@ -2,6 +2,13 @@
   "name": "chest",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "chest": "__build__/src/chest.js"
+  },
+  "scripts": {
+    "exe": "echo '#!/usr/bin/env node' > chest && cat chest-pre >> chest && rm chest-pre && chmod +x chest",
+    "build": "tsc && browserify --bare __build__/src/chest.js -o chest-pre && npm run exe"
+  },
   "dependencies": {
     "@types/dockerode": "^2.5.9",
     "dockerode": "^2.5.7"
