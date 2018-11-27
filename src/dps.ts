@@ -39,6 +39,7 @@ async function run(all: boolean) {
     if (ports)
       out.write(ports)
   }
+  out.write('\n')
 
 }
 

@@ -113,22 +113,23 @@ async function run(contdesc: string, command: string, args: string[]) {
   const infos = await container.inspect()
   const labels = infos.Config.Labels
 
-  const BASE_DIR = process.env.CHEST_BACKUPS_DIR || path.join(process.env.HOME!, '.chest/backups/')
+  const BASE_DIR = process.env.CHEST_BACKUPS_DIR || '/home/chest/backups/'
 
   // First try to see if the directory was specified in a label or in the command line.
   // the command line has priority
-  dir = dir || labels['chest.dir']
+  dir = dir || labels['chest.name']
 
   // If it is absolute, keep as is.
   dir = dir && dir[0] === '/' ? dir :
     // otherwise, use the base directory.
-    path.join(BASE_DIR, dir || contid.replace(/^.*\//, ''))
+    path.join(BASE_DIR, dir || infos.Name.replace(/^.*\//, ''))
+  console.log(` => Using backup repository ${dir}`)
 
   const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || 'chest'
   const passphrase = process.env.CHEST_PASSPHRASE || labels['borg.passphrase'] || ''
 
   if (command === 'borg') {
-    runBorgOnContainer(container, dir, 'borg ' + args.join(' ')).catch(e => console.error(e))
+    await runBorgOnContainer(container, dir, 'borg ' + args.join(' ')).catch(e => console.error(e))
   } else if (command === 'backup') {
     const name = args[0] || [prefix, getTimestamp()].filter(q => q).join('-')
 
@@ -139,7 +140,7 @@ async function run(contdesc: string, command: string, args: string[]) {
       prune = ''
 
     // FIXME should prune on prefix only !
-    runBorgOnContainer(container, dir, `
+    await runBorgOnContainer(container, dir, `
       if grep repository %repo/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
         borg init -e ${passphrase ? "repokey-blake2" : "none"} %repo
       fi
@@ -147,11 +148,11 @@ async function run(contdesc: string, command: string, args: string[]) {
       ${prune ? `borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
     `)
   } else if (command === 'list') {
-    runBorgOnContainer(container, dir, `borg list --format="{archive}{NL}" ::`)
+    await runBorgOnContainer(container, dir, `borg list --format="{archive}{NL}" ::`)
   } else if (command === 'show') {
-    runBorgOnContainer(container, dir, `borg list --format="{mode}{TAB}{size}{TAB}{path}{NL}" ::${args[0]}`)
+    await runBorgOnContainer(container, dir, `borg list --format="{mode}{TAB}{size}{TAB}{path}{NL}" ::${args[0]}`)
   } else if (command === 'restore') {
-    runBorgOnContainer(container, dir, `
+    await runBorgOnContainer(container, dir, `
     cd %data && borg extract --list -v "::${args[0]}"
   `)
   } else {
@@ -160,7 +161,7 @@ async function run(contdesc: string, command: string, args: string[]) {
 }
 
 async function backupAll() {
-  const all = await d.listContainers()
+  const all = await d.listContainers({all: true})
   for (var cont of all) {
     if (cont.Labels['chest.auto-backup']) {
       await run(cont.Id, 'backup', [])
