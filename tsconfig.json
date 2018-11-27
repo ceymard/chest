@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "es6",
     "module": "commonjs",
     "moduleResolution": "node",
     "declaration": true,
@@ -11,9 +11,7 @@
     "rootDir": ".",
     "noStrictGenericChecks": true,
     "experimentalDecorators": true,
-    "jsx": "react",
-    "reactNamespace": "E",
-    "lib": ["es6", "dom"]
+    "lib": ["es6"]
   },
   "exclude": ["__dist__", "__build__"]
 }

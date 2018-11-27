@@ -1,42 +1,73 @@
+#!/usr/bin/env node
 import * as path from 'path'
 import * as Docker from 'dockerode'
 
 const d = new Docker()
 const BORG_IMAGE = 'ceymard/borg'
 
-async function setupLogging(cont: Docker.Container) {
 
-  const stream = await cont.logs({stdout: true, stderr: true, follow: true})
-  cont.modem.demuxStream(stream, process.stdout, process.stderr)
+/**
+ * A simple timestamping function that returns string like '181101-030024'.
+ *
+ * We use this format because selecting it in a terminal won't choke, whereas
+ * using a regular date time format tends to not select text past the ':'
+ */
+function getTimestamp() {
+  var d = new Date()
+  var pad = (n: number) => n < 10 ? '0' + n : n.toString()
+  return d.getFullYear().toString().slice(2, 4)
+    + pad(d.getMonth() + 1)
+    + pad(d.getDate())
+    + '-'
+    + pad(d.getHours())
+    + pad(d.getMinutes())
+    + pad(d.getSeconds())
 }
 
 /**
- * Backup a container
+ * Run the given command in the container.
  */
-async function runBorgOnContainer(id: string, dir: string, args: string) {
-  const cont = await d.getContainer(id)
+async function runBorgOnContainer(cont: Docker.Container, dir: string, args: string) {
   const infos = await cont.inspect()
   const CONT_WAS_RUNNING = !!infos.State.Running
 
   var IS_DATA = false
-  // args = args.map(a => {
-  if (args.indexOf('%data') > -1) {
+  if (args.includes('%data')) {
     IS_DATA = true
   }
-
-  args = args.replace(/%repo/g, '/repository')
-      .replace(/%data/g, '/staging')
 
   const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:ro`)
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
   binds.push(`${dir}:/repository:rw`)
 
+  const env = [
+    'BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes',
+    'BORG_RELOCATED_REPO_ACCESS_IS_OK=yes',
+    'BORG_HOSTNAME_IS_UNIQUE=no',
+    'BORG_REPO=/repository'
+  ]
+
+  const labels = infos.Config.Labels
+
+  const passphrase = process.env.CHEST_PASSPHRASE || labels['chest.passphrase'] || ''
+  if (passphrase)
+    env.push(`BORG_PASSPHRASE=${passphrase}`)
+
+  args = args.replace(/%repo/g, '/repository')
+    .replace(/%data/g, '/staging')
+
   var borg!: Docker.Container
+  const try_stop = async (container: Docker.Container) => {
+    const running = (await container.inspect()).State.Running
+    if (running)
+      await container.stop()
+    return running
+  }
   try {
     if (IS_DATA) {
       console.log(`Stopping ${infos.Name}`)
-      await cont.stop()
+      try_stop(cont)
     }
 
     // console.log(`running /bin/ash -c ${args}`)
@@ -49,25 +80,18 @@ async function runBorgOnContainer(id: string, dir: string, args: string) {
       },
       WorkingDir: '/staging',
       Entrypoint: '/bin/ash',
-      Env: [
-        'BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes',
-        'BORG_RELOCATED_REPO_ACCESS_IS_OK=yes'
-      ],
+      Env: env,
       Cmd: ['-c', args]
     })
 
     await borg.start();
-    await setupLogging(borg)
+    const stream = await borg.logs({stdout: true, stderr: true, follow: true})
+    cont.modem.demuxStream(stream, process.stdout, process.stderr)
     await borg.wait()
-
-    if ((await borg.inspect()).State.Running)
-      await borg.stop()
+    await try_stop(borg)
   } finally {
     // Stop borg if it is still running but errored
-    try {
-      if (borg && (await borg.inspect()).State.Running)
-        await borg.stop()
-    } catch { }
+    await try_stop(borg)
 
     // Restart container if it was running before
     try {
@@ -83,35 +107,117 @@ async function runBorgOnContainer(id: string, dir: string, args: string) {
 }
 
 
+async function run(contdesc: string, command: string, args: string[]) {
+  var [contid, dir] = contdesc.split(':')
+  const container = await d.getContainer(contid)
+  const infos = await container.inspect()
+  const labels = infos.Config.Labels
+
+  const BASE_DIR = process.env.CHEST_BACKUPS_DIR || path.join(process.env.HOME!, '.chest/backups/')
+
+  // First try to see if the directory was specified in a label or in the command line.
+  // the command line has priority
+  dir = dir || labels['chest.dir']
+
+  // If it is absolute, keep as is.
+  dir = dir && dir[0] === '/' ? dir :
+    // otherwise, use the base directory.
+    path.join(BASE_DIR, dir || contid.replace(/^.*\//, ''))
+
+  const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || 'chest'
+  const passphrase = process.env.CHEST_PASSPHRASE || labels['chest.passphrase'] || ''
+
+  if (command === 'borg') {
+    runBorgOnContainer(container, dir, 'borg ' + args.join(' ')).catch(e => console.error(e))
+  } else if (command === 'backup') {
+    const name = args[0] || [prefix, getTimestamp()].filter(q => q).join('-')
+
+    var prune = process.env.CHEST_PRUNE || labels['chest.prune']
+    if (prune === 'auto')
+      prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
+    else if (prune && !prune.includes('-')) // no real arguments to prune
+      prune = ''
+
+    // FIXME should prune on prefix only !
+    runBorgOnContainer(container, dir, `
+      if grep repository %repo/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
+        borg init -s -e ${passphrase ? "repokey-blake2" : "none"} %repo
+      fi
+      cd %data && borg create --stats "::${name}" ./*
+      ${prune ? `borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
+    `)
+  } else if (command === 'list') {
+    runBorgOnContainer(container, dir, `borg list --format="{archive}{NL}" ::`)
+  } else if (command === 'show') {
+    runBorgOnContainer(container, dir, `borg list --format="{mode}{TAB}{size}{TAB}{path}{NL}" ::${args[0]}`)
+  } else if (command === 'restore') {
+    runBorgOnContainer(container, dir, `
+    cd %data && borg extract --stats "::${args[0]}"
+  `)
+  } else {
+    usage()
+  }
+}
+
+async function backupAll() {
+  const all = await d.listContainers()
+  for (var cont of all) {
+    if (cont.Labels['chest.auto-backup']) {
+      await run(cont.Id, 'backup', [])
+    }
+  }
+}
+
 function usage() {
-  console.log(`usage: chest <container> <backup|restore|exec|list> [arguments]`)
+  console.log(`usage:
+  chest <container[:backupdir]> backup [backup-name]
+    create a backup
+  chest <container[:backupdir]> restore <backup-name>
+    restore backup into the container
+  chest <container[:backupdir]> list
+    list a backups' archives
+  chest <container[:backupdir]> show [backup-name]
+    list the files in an archive
+  chest <container[:backupdir]> borg [borg commands...]
+    execute a row borg command. You may refer to the repository as '::' and
+    to the data directory as %data.
+  chest backup-all
+    backup all containers that have the label chest.auto-backup
+
+If backupdir is not specified, it becomes $HOME/.chest/backups/<container_name>
+You may specify the "chest.dir" label on the container, in which case it is used
+instead of <container_name>. If it starts with /, then it is used as the directory.
+
+Use the CHEST_BACKUPS_DIR environment variable to put the base backup directory
+elsewhere than in $HOME/.chest/backups.
+
+Env variables :
+  * CHEST_PRUNE : "auto" or flags for the prune command to use with backup
+  * CHEST_PASSPHRASE : Force the use of a passphrase
+  * CHEST_BACKUPS_DIR : The root of all backups instead of $HOME/.chest/backups
+  * CHEST_PREFIX : The prefix to use with backup
+
+Usable labels:
+  * chest.dir : the directory name for the backup. Can be absolute or relative to
+               CHEST_BACKUPS_DIR.
+  * chest.prefix : The name of the prefix of the archives created with the backup
+                  command. Defaults to "chest"
+  * chest.prune : "auto" or flags for the borg prune command. If specified, prune
+                  will be run each time the container is backuped on all archives
+                  with the same prefix.
+  * chest.passphrase : a passphrase for the archive. If unspecified, the repository
+                  will not be encrypted.
+`)
   process.exit(1)
 }
 
 const [contdesc, command, ...args] = process.argv.slice(2)
-if (!command) {
+if (!command && contdesc !== 'backup-all') {
   usage()
 }
-var [container, dir] = contdesc.split(':')
-dir = dir || path.join(process.env.HOME!, '.chest/backups/', container.replace(/^.*\//, ''))
 
-if (command === 'exec') {
-  runBorgOnContainer(container, dir, args.join(' ')).catch(e => console.error(e))
-} else if (command === 'backup') {
-  const now = [args[0], (new Date()).toJSON()].filter(q => q).join('-')
-
-  // FIXME should prune on prefix only !
-  runBorgOnContainer(container, dir, `
-    if grep repository %repo/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-      borg init -e "none" %repo
-    fi
-    cd %data && borg create --stats "%repo::${now}" ./*
-    borg prune --keep-daily 7 --keep-weekly 2 --keep-monthly 1 --list --stats %repo
-  `)
-} else if (command === 'list') {
-  runBorgOnContainer(container, dir, `borg list %repo`)
-} else if (command === 'show') {
-  runBorgOnContainer(container, dir, `borg list %repo::${args[0]}`)
-} else {
-  usage()
+if (contdesc !== 'backup-all')
+  run(contdesc, command, args).catch(e => console.error(e))
+else {
+  backupAll().catch(e => console.error(e))
 }
