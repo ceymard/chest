@@ -186,7 +186,7 @@ function usage() {
     backup all containers that have the label chest.auto-backup
 
 If backupdir is not specified, it becomes $HOME/.chest/backups/<container_name>
-You may specify the "chest.dir" label on the container, in which case it is used
+You may specify the "chest.name" label on the container, in which case it is used
 instead of <container_name>. If it starts with /, then it is used as the directory.
 
 Use the CHEST_BACKUPS_DIR environment variable to put the base backup directory
@@ -199,7 +199,7 @@ Env variables :
   * CHEST_PREFIX : The prefix to use with backup
 
 Usable labels:
-  * chest.dir : the directory name for the backup. Can be absolute or relative to
+  * chest.name : the directory name for the backup. Can be absolute or relative to
                CHEST_BACKUPS_DIR.
   * chest.prefix : The name of the prefix of the archives created with the backup
                   command. Defaults to "chest"
