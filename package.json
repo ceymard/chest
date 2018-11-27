@@ -7,10 +7,16 @@
   },
   "scripts": {
     "exe": "echo '#!/usr/bin/env node' > chest && cat chest-pre >> chest && rm chest-pre && chmod +x chest",
-    "build": "tsc && browserify --bare __build__/src/chest.js -o chest-pre && npm run exe"
+    "build": "tsc && browserify --bare __build__/src/chest.js -o chest-pre && npm run exe",
+    "exe-dps": "echo '#!/usr/bin/env node' > dps && cat dps-pre >> dps && rm dps-pre && chmod +x dps",
+    "build-dps": "tsc && browserify --bare __build__/src/dps.js -o dps-pre && npm run exe-dps"
   },
   "dependencies": {
     "@types/dockerode": "^2.5.9",
+    "colors": "^1.3.2",
     "dockerode": "^2.5.7"
+  },
+  "devDependencies": {
+    "@types/colors": "^1.2.1"
   }
 }

@@ -57,7 +57,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
   args = args.replace(/%repo/g, '/repository')
     .replace(/%data/g, '/staging')
 
-  var borg!: Docker.Container
+  var borg: Docker.Container | undefined
   const try_stop = async (container: Docker.Container) => {
     const running = (await container.inspect()).State.Running
     if (running)
@@ -91,7 +91,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
     await try_stop(borg)
   } finally {
     // Stop borg if it is still running but errored
-    await try_stop(borg)
+    if (borg) await try_stop(borg)
 
     // Restart container if it was running before
     try {
