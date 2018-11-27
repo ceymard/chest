@@ -29,12 +29,6 @@ function getTimestamp() {
  */
 async function runBorgOnContainer(cont: Docker.Container, dir: string, args: string) {
   const infos = await cont.inspect()
-  const CONT_WAS_RUNNING = !!infos.State.Running
-
-  var IS_DATA = false
-  if (args.includes('%data')) {
-    IS_DATA = true
-  }
 
   const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:ro`)
   binds.push('/etc/localtime:/etc/localtime:ro')
@@ -48,14 +42,21 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
     'BORG_REPO=/repository'
   ]
 
+  const CONT_WAS_RUNNING = !!infos.State.Running
   const labels = infos.Config.Labels
 
-  const passphrase = process.env.CHEST_PASSPHRASE || labels['chest.passphrase'] || ''
+  const passphrase = process.env.BORG_PASSPHRASE || labels['borg.passphrase'] || ''
   if (passphrase)
     env.push(`BORG_PASSPHRASE=${passphrase}`)
 
   args = args.replace(/%repo/g, '/repository')
     .replace(/%data/g, '/staging')
+
+  var SHOULD_SHUTDOWN = false
+  if (args.includes('%data') && !labels['chest.keep-running']) {
+    SHOULD_SHUTDOWN = true
+  }
+
 
   var borg!: Docker.Container
   const try_stop = async (container: Docker.Container) => {
@@ -65,7 +66,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
     return running
   }
   try {
-    if (IS_DATA) {
+    if (SHOULD_SHUTDOWN) {
       console.log(`Stopping ${infos.Name}`)
       try_stop(cont)
     }
@@ -95,7 +96,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
 
     // Restart container if it was running before
     try {
-      if (IS_DATA && CONT_WAS_RUNNING && !(await cont.inspect()).State.Running) {
+      if (SHOULD_SHUTDOWN && CONT_WAS_RUNNING && !(await cont.inspect()).State.Running) {
         console.log(`Restarting ${infos.Name}`)
         await cont.start()
       }
@@ -125,14 +126,14 @@ async function run(contdesc: string, command: string, args: string[]) {
     path.join(BASE_DIR, dir || contid.replace(/^.*\//, ''))
 
   const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || 'chest'
-  const passphrase = process.env.CHEST_PASSPHRASE || labels['chest.passphrase'] || ''
+  const passphrase = process.env.CHEST_PASSPHRASE || labels['borg.passphrase'] || ''
 
   if (command === 'borg') {
     runBorgOnContainer(container, dir, 'borg ' + args.join(' ')).catch(e => console.error(e))
   } else if (command === 'backup') {
     const name = args[0] || [prefix, getTimestamp()].filter(q => q).join('-')
 
-    var prune = process.env.CHEST_PRUNE || labels['chest.prune']
+    var prune = process.env.BORG_PRUNE || labels['borg.prune']
     if (prune === 'auto')
       prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
     else if (prune && !prune.includes('-')) // no real arguments to prune
@@ -141,7 +142,7 @@ async function run(contdesc: string, command: string, args: string[]) {
     // FIXME should prune on prefix only !
     runBorgOnContainer(container, dir, `
       if grep repository %repo/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-        borg init -s -e ${passphrase ? "repokey-blake2" : "none"} %repo
+        borg init -e ${passphrase ? "repokey-blake2" : "none"} %repo
       fi
       cd %data && borg create --stats "::${name}" ./*
       ${prune ? `borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
@@ -192,8 +193,8 @@ Use the CHEST_BACKUPS_DIR environment variable to put the base backup directory
 elsewhere than in $HOME/.chest/backups.
 
 Env variables :
-  * CHEST_PRUNE : "auto" or flags for the prune command to use with backup
-  * CHEST_PASSPHRASE : Force the use of a passphrase
+  * BORG_PASSPHRASE : Force the use of a passphrase
+  * BORG_PRUNE : "auto" or flags for the prune command to use with backup
   * CHEST_BACKUPS_DIR : The root of all backups instead of $HOME/.chest/backups
   * CHEST_PREFIX : The prefix to use with backup
 
@@ -202,11 +203,16 @@ Usable labels:
                CHEST_BACKUPS_DIR.
   * chest.prefix : The name of the prefix of the archives created with the backup
                   command. Defaults to "chest"
-  * chest.prune : "auto" or flags for the borg prune command. If specified, prune
+  * borg.prune : "auto" or flags for the borg prune command. If specified, prune
                   will be run each time the container is backuped on all archives
                   with the same prefix.
-  * chest.passphrase : a passphrase for the archive. If unspecified, the repository
+  * borg.passphrase : a passphrase for the archive. If unspecified, the repository
                   will not be encrypted.
+  * chest.auto-backup : any value will mark this container as backupable with the
+                  chest backup-all command
+  * chest.keep-running : do not shut down this container prior to backuping it.
+                  warning : some containers may be backuped in an inconsistent
+                  state with this option !
 `)
   process.exit(1)
 }
