@@ -30,7 +30,7 @@ function getTimestamp() {
 async function runBorgOnContainer(cont: Docker.Container, dir: string, args: string) {
   const infos = await cont.inspect()
 
-  const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:ro`)
+  const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:rw`)
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
   binds.push(`${dir}:/repository:rw`)
@@ -49,14 +49,13 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
   if (passphrase)
     env.push(`BORG_PASSPHRASE=${passphrase}`)
 
-  args = args.replace(/%repo/g, '/repository')
-    .replace(/%data/g, '/staging')
-
   var SHOULD_SHUTDOWN = false
-  if (args.includes('%data') && !labels['chest.keep-running']) {
+  if (args.match(/%data/i) && !labels['chest.keep-running']) {
     SHOULD_SHUTDOWN = true
   }
 
+  args = args.replace(/%repo/g, '/repository')
+    .replace(/%data/g, '/staging')
 
   var borg!: Docker.Container
   const try_stop = async (container: Docker.Container) => {
@@ -68,7 +67,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
   try {
     if (SHOULD_SHUTDOWN) {
       console.log(`Stopping ${infos.Name}`)
-      try_stop(cont)
+      await try_stop(cont)
     }
 
     // console.log(`running /bin/ash -c ${args}`)
@@ -153,7 +152,7 @@ async function run(contdesc: string, command: string, args: string[]) {
     runBorgOnContainer(container, dir, `borg list --format="{mode}{TAB}{size}{TAB}{path}{NL}" ::${args[0]}`)
   } else if (command === 'restore') {
     runBorgOnContainer(container, dir, `
-    cd %data && borg extract --stats "::${args[0]}"
+    cd %data && borg extract --list -v "::${args[0]}"
   `)
   } else {
     usage()
