@@ -36,20 +36,43 @@ async function run(all: boolean) {
       out.write(c.yellow('*host-net*') + '\t')
 
     if (dc_project) {
-      canonical = canonical.replace(dc_project, c.gray(dc_project))
+      canonical = canonical.replace(dc_project, c.cyan(dc_project))
     }
 
-    out.write(canonical + ' ')
+    out.write(canonical + '.docker ')
+
+    const more_infos = [] as string[]
+
+    for (let e of cf.Config.Env) {
+      if (e.match(/^VIRTUAL_HOST/)) {
+        e = e.replace('VIRTUAL_HOST=', '')
+        more_infos.push(c.gray(e))
+      }
+    }
+
     if (labels['chest.auto-backup'])
-      out.write(c.bold(c.magenta('backuped')))
+      more_infos.push(c.magenta('backuped'))
 
-    var ports = cont.Ports.filter(p => p.PublicPort).map(p => `${c.bold(c.green(p.PublicPort.toString()))} => ${p.PrivatePort}/${p.Type}`).join(', ')
-    if (ports)
-      out.write(ports)
+    for (let p of cont.Ports) {
+      if (p.PublicPort) {
+        more_infos.push(`${p.IP || '0.0.0.0@'}${c.bold(c.green(p.PublicPort.toString()))} => ${p.PrivatePort}/${p.Type}`)
+      } else {
+        more_infos.push(`${c.bold(c.yellow(p.PrivatePort.toString()))}/${p.Type}`)
+      }
+    }
 
-    var publicports = Object.keys(cf.HostConfig.PortBindings).map(p => `${c.bold(c.green(p))}`).join(', ')
-    if (publicports)
-      out.write(publicports)
+    if (cf.HostConfig.NetworkMode === 'host') {
+      for (let key in cf.HostConfig.PortBindings) {
+        var ppor = cf.HostConfig.PortBindings[key]
+        for (let p of ppor) {
+          more_infos.push((p.HostIp || '0.0.0.0') + '@' + c.bold(c.green(p.HostPort)))
+        }
+          // more_infos.push(JSON.stringify(p))
+      }
+    }
+
+    if (more_infos.length)
+      out.write('\t' + more_infos.join(' '))
   }
   out.write('\n')
 
