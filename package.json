@@ -16,8 +16,9 @@
     "dockerode": "^2.5.7"
   },
   "devDependencies": {
+    "@types/colors": "^1.2.1",
+    "@types/command-line-args": "^5.0.0",
     "@types/dockerode": "^2.5.9",
-    "browserify": "^16.2.3",
-    "@types/colors": "^1.2.1"
+    "browserify": "^16.2.3"
   }
 }

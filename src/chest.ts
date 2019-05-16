@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as path from 'path'
 import * as Docker from 'dockerode'
+import * as fs from 'fs'
 
 const d = new Docker()
 const BORG_IMAGE = 'ceymard/borg'
@@ -27,10 +28,10 @@ function getTimestamp() {
 /**
  * Run the given command in the container.
  */
-async function runBorgOnContainer(cont: Docker.Container, dir: string, args: string) {
-  const infos = await cont.inspect()
+async function runBorgOnContainer(cont: Docker.Container | null, dir: string, args: string) {
+  const infos = cont ? await cont.inspect() : null
 
-  const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:rw`)
+  const binds: string[] = infos ? infos.Mounts.map(m => `${m.Source}:${path.join(`/staging`, m.Destination)}:rw`) : []
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
   binds.push(`${dir}:/repository:rw`)
@@ -42,8 +43,8 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
     'BORG_REPO=/repository'
   ]
 
-  const CONT_WAS_RUNNING = !!infos.State.Running
-  const labels = infos.Config.Labels
+  const CONT_WAS_RUNNING = infos && !!infos.State.Running
+  const labels = infos ? infos.Config.Labels : {}
 
   const passphrase = process.env.BORG_PASSPHRASE || labels['borg.passphrase'] || ''
   if (passphrase)
@@ -65,7 +66,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
     return running
   }
   try {
-    if (SHOULD_SHUTDOWN) {
+    if (cont && infos && SHOULD_SHUTDOWN) {
       console.log(`Stopping ${infos.Name}`)
       await try_stop(cont)
     }
@@ -86,7 +87,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
 
     await borg.start();
     const stream = await borg.logs({stdout: true, stderr: true, follow: true})
-    cont.modem.demuxStream(stream, process.stdout, process.stderr)
+    borg.modem.demuxStream(stream, process.stdout, process.stderr)
     await borg.wait()
     await try_stop(borg)
   } finally {
@@ -95,7 +96,7 @@ async function runBorgOnContainer(cont: Docker.Container, dir: string, args: str
 
     // Restart container if it was running before
     try {
-      if (SHOULD_SHUTDOWN && CONT_WAS_RUNNING && !(await cont.inspect()).State.Running) {
+      if (cont && infos && SHOULD_SHUTDOWN && CONT_WAS_RUNNING && !(await cont.inspect()).State.Running) {
         console.log(`Restarting ${infos.Name}`)
         await cont.start()
       }
@@ -180,12 +181,14 @@ function usage() {
   chest <container[:backupdir]> restore <backup-name>
     restore backup into the container
   chest <container[:backupdir]> list
-    list a backups' archives
+    list a container backups' archives
   chest <container[:backupdir]> show [backup-name]
     list the files in an archive
   chest <container[:backupdir]> borg [borg commands...]
     execute a raw borg command. You may refer to the repository as '::' and
     to the data directory as %data.
+  chest <relative or absolute path> <borg commands...>
+    run borg commands on the given directory
   chest backup-all
     backup all containers that have the label chest.auto-backup
 
@@ -225,12 +228,17 @@ Borg specific options
 }
 
 const [contdesc, command, ...args] = process.argv.slice(2)
-if (!command && contdesc !== 'backup-all') {
+if (!contdesc) {
   usage()
 }
 
-if (contdesc !== 'backup-all')
-  run(contdesc, command, args).catch(e => console.error(e))
-else {
+if (contdesc[0] === '.' || contdesc[0] === '/') {
+  const stats = fs.statSync(contdesc)
+  if (stats.isDirectory()) {
+    runBorgOnContainer(null, path.resolve(contdesc), 'borg ' + args.join(' '))
+  }
+} else if (contdesc === 'backup-all') {
   backupAll().catch(e => console.error(e))
+} else {
+  run(contdesc, command, args).catch(e => console.error(e))
 }
