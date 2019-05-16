@@ -12,6 +12,9 @@ async function run(all: boolean) {
   var current_project = null as null | string
 
   for (var cont of containers) {
+    const ct = await d.getContainer(cont.Id)
+    const cf = await ct.inspect()
+
     var canonical = cont.Names[0].slice(1)
     const labels = cont.Labels
     var dc_project = labels['com.docker.compose.project']
@@ -25,7 +28,12 @@ async function run(all: boolean) {
     for (var x in networks) {
       ips.push(networks[x].IPAddress)
     }
-    out.write(ips.join(', ') + '\t')
+
+    ips = ips.filter(i => i)
+    if (ips.length)
+      out.write(ips.join(', ') + '\t')
+    else
+      out.write(c.yellow('*host-net*') + '\t')
 
     if (dc_project) {
       canonical = canonical.replace(dc_project, c.gray(dc_project))
@@ -38,6 +46,10 @@ async function run(all: boolean) {
     var ports = cont.Ports.filter(p => p.PublicPort).map(p => `${c.bold(c.green(p.PublicPort.toString()))} => ${p.PrivatePort}/${p.Type}`).join(', ')
     if (ports)
       out.write(ports)
+
+    var publicports = Object.keys(cf.HostConfig.PortBindings).map(p => `${c.bold(c.green(p))}`).join(', ')
+    if (publicports)
+      out.write(publicports)
   }
   out.write('\n')
 
