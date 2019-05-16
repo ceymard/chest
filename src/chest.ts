@@ -145,7 +145,11 @@ async function run(contdesc: string, command: string, args: string[]) {
         borg init -e ${passphrase ? "repokey-blake2" : "none"} %repo
       fi
       cd %data && borg create --stats "::${name}" ./*
-      ${prune ? `borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
+      ${prune ? `
+      echo
+      echo " --- pruning --- "
+      echo
+      borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
     `)
   } else if (command === 'list') {
     await runBorgOnContainer(container, dir, `borg list --format="{archive}{NL}" ::`)
@@ -180,7 +184,7 @@ function usage() {
   chest <container[:backupdir]> show [backup-name]
     list the files in an archive
   chest <container[:backupdir]> borg [borg commands...]
-    execute a row borg command. You may refer to the repository as '::' and
+    execute a raw borg command. You may refer to the repository as '::' and
     to the data directory as %data.
   chest backup-all
     backup all containers that have the label chest.auto-backup
@@ -198,21 +202,24 @@ Env variables :
   * CHEST_BACKUPS_DIR : The root of all backups instead of $HOME/.chest/backups
   * CHEST_PREFIX : The prefix to use with backup
 
-Usable labels:
+Usable labels on your containers:
   * chest.name : the directory name for the backup. Can be absolute or relative to
                CHEST_BACKUPS_DIR.
   * chest.prefix : The name of the prefix of the archives created with the backup
                   command. Defaults to "chest"
-  * borg.prune : "auto" or flags for the borg prune command. If specified, prune
-                  will be run each time the container is backuped on all archives
-                  with the same prefix.
-  * borg.passphrase : a passphrase for the archive. If unspecified, the repository
-                  will not be encrypted.
   * chest.auto-backup : any value will mark this container as backupable with the
                   chest backup-all command
   * chest.keep-running : do not shut down this container prior to backuping it.
                   warning : some containers may be backuped in an inconsistent
                   state with this option !
+
+Borg specific options
+  * borg.prune : "auto" or flags for the borg prune command. If specified, prune
+                  will be run each time the container is backuped on all archives
+                  with the same prefix.
+  * borg.passphrase : a passphrase for the archive. If unspecified, the repository
+                  will not be encrypted.
+
 `)
   process.exit(1)
 }
