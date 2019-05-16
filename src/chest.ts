@@ -120,7 +120,7 @@ async function run(contdesc: string, command: string, args: string[]) {
   dir = dir || labels['chest.name']
 
   // If it is absolute, keep as is.
-  dir = dir && (dir[0] === '/' || dir[0] === '.') ? dir :
+  dir = dir && (dir[0] === '/' || dir[0] === '.') ? path.resolve(dir) :
     // otherwise, use the base directory.
     path.join(BASE_DIR, dir || infos.Name.replace(/^.*\//, ''))
   console.log(` => Using backup repository ${dir}`)
