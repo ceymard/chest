@@ -1,7 +1,6 @@
 {
   "name": "@salesway/docker-tools",
   "version": "0.1.0",
-  "private": true,
   "bin": {
     "chest": "lib/chest.js",
     "dps": "lib/dps.js"
