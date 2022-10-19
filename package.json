@@ -1,24 +1,28 @@
 {
-  "name": "chest",
+  "name": "@salesway/docker-tools",
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "chest": "__build__/src/chest.js"
+    "chest": "lib/chest.js",
+    "dps": "lib/dps.js"
   },
   "scripts": {
-    "exe": "echo '#!/usr/bin/env node' > chest && cat chest-pre >> chest && rm chest-pre && chmod +x chest",
-    "build": "tsc && browserify --bare __build__/src/chest.js -o chest-pre && npm run exe",
-    "exe-dps": "echo '#!/usr/bin/env node' > dps && cat dps-pre >> dps && rm dps-pre && chmod +x dps",
-    "build-dps": "tsc && browserify --bare __build__/src/dps.js -o dps-pre && npm run exe-dps"
+    "build:chest": "esbuild --bundle --outfile=lib/chest.js --platform=node src/chest.ts",
+    "build:dps": "esbuild --bundle --outfile=lib/dps.js --platform=node src/dps.ts",
+    "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps",
+    "watch": "tsc --no-emit | wtsc npm run build"
   },
   "dependencies": {
+    "@types/node": "^18.11.2",
     "colors": "^1.3.2",
-    "dockerode": "^2.5.7"
+    "dockerode": "^2.5.7",
+    "esbuild": "^0.15.11",
+    "typescript": "^4.8.4",
+    "wtsc": "^0.1.2"
   },
   "devDependencies": {
     "@types/colors": "^1.2.1",
     "@types/command-line-args": "^5.0.0",
-    "@types/dockerode": "^2.5.9",
-    "browserify": "^16.2.3"
+    "@types/dockerode": "^2.5.9"
   }
 }

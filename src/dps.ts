@@ -1,4 +1,5 @@
-import * as Docker from 'dockerode'
+#!/usr/bin/env node
+import Docker from 'dockerode'
 import * as c from 'colors/safe'
 
 async function run(all: boolean) {

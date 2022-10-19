@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es5",
+    "target": "ES2021",
     "module": "commonjs",
     "moduleResolution": "node",
     "declaration": true,
@@ -11,6 +11,7 @@
     "rootDir": ".",
     "noStrictGenericChecks": true,
     "experimentalDecorators": true,
+    "esModuleInterop": true,
     "lib": ["es6"]
   },
   "exclude": ["__dist__", "__build__"]
