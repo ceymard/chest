@@ -6,6 +6,7 @@ interface Options {
   all: boolean
   verbose: boolean
   filter: string
+  urls: boolean
 }
 
 interface ContainerInfos {
@@ -28,6 +29,15 @@ const out = process.stdout
 
 let current_compose = ""
 function display(c: ContainerInfos, opts: Options) {
+
+  if (opts.urls) {
+    if (!c.urls.length) return
+    for (let u of c.urls) {
+      out.write(col.cyan(`🌐 ${u} ${col.gray(c.compose)} ${col.gray(c.name)}\n`))
+    }
+    return
+  }
+
   if (current_compose !== c.compose) {
     current_compose = c.compose
     out.write(`${col.bold(c.compose)}\n`)
@@ -123,12 +133,13 @@ async function run(options: Options) {
 }
 
 let args = process.argv.slice(2)
-let options = { all: false, filter: "", verbose: false }
+let options = { all: false, filter: "", verbose: false, urls: false }
 
 for (let a of args) {
   if (a[0] === "-") {
     if (a.includes("a")) options.all = true
     if (a.includes("v")) options.verbose = true
+    if (a.includes("u")) options.urls = true
   } else {
     options.filter = a
   }
