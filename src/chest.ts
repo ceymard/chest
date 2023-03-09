@@ -118,7 +118,7 @@ async function run(contdesc: string, command: string, args: string[]) {
 
   // First try to see if the directory was specified in a label or in the command line.
   // the command line has priority
-  dir = dir || labels['chest.name']
+  dir = dir || labels['chest.name'] || labels["com.docker.compose.project"]
 
   // If it is absolute, keep as is.
   dir = dir && (dir[0] === '/' || dir[0] === '.') ? path.resolve(dir) :
@@ -126,7 +126,7 @@ async function run(contdesc: string, command: string, args: string[]) {
     path.join(BASE_DIR, dir || infos.Name.replace(/^.*\//, ''))
   console.log(` => Using backup repository ${dir}`)
 
-  const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || 'chest'
+  const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || labels["com.docker.compose.service"] || 'chest'
   const passphrase = process.env.CHEST_PASSPHRASE || labels['borg.passphrase'] || ''
 
   if (command === 'borg') {
