@@ -40,7 +40,7 @@ function display(c: ContainerInfos, opts: Options) {
 
   if (current_compose !== c.compose) {
     current_compose = c.compose
-    out.write(`${col.bold(c.compose)}\n`)
+    out.write(`\n${col.bold(c.compose)} ${col.gray(c.composePath)}\n`)
   }
 
   let r = c.running ? col.green : col.red
