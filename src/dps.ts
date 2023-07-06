@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import Docker from 'dockerode'
-import * as col from 'colors/safe'
+import col from 'colors/safe'
 
 interface Options {
   all: boolean
@@ -13,6 +13,7 @@ interface ContainerInfos {
   compose: string
   composePath: string
   composeService: string
+  image: string
 
   name: string
   running: boolean
@@ -39,12 +40,18 @@ function display(c: ContainerInfos, opts: Options) {
   }
 
   if (current_compose !== c.compose) {
+    if (current_compose !== "") {
+      out.write(`\n┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`)
+    }
+
     current_compose = c.compose
-    out.write(`\n${col.bold(c.compose)} ${col.gray(c.composePath)}\n`)
+    out.write(`\n┏━${col.bgWhite(col.bold(col.black(" " + c.compose + " ")))}━ ${col.gray(c.composePath)}`)
+  } else {
+    out.write("\n┃")
   }
 
   let r = c.running ? col.green : col.red
-  out.write(`  ${c.running ? col.green("⏵") : col.red("⏸")} ${c.name.replace(c.composeService, e => col.bold(r(e)))}.docker`)
+  out.write(`\n┣━${c.running ? col.green("⏵") : col.red("⏸")} ${c.name.replace(c.composeService, e => col.bold(r(e)))}.docker`)
 
   if (c.ips.length > 0) {
     out.write(` ${col.gray(c.ips.join(" "))}`)
@@ -56,21 +63,27 @@ function display(c: ContainerInfos, opts: Options) {
     out.write(` ${p.public ? col.red(col.bold(p.ip??"0.0.0.0")) + "@" + p.host + ":": ""}${col.yellow(p.local.toString())}/${p.type}`)
   }
 
-  out.write("\n")
+  out.write("\n┃")
+  out.write(`    ${col.grey(c.image.replace(/:[^]*$/, m => col.bold(col.blue(m))))}`)
+
 
   if (c.backupName) {
-    out.write(col.magenta(`    💾 ${c.backuped ? col.green(col.bold("auto ")) : ""}${c.backupName}\n`))
+    out.write(`\n┃`)
+    out.write(col.magenta(`    💾 ${c.backuped ? col.green(col.bold("auto ")) : ""}${c.backupName}`))
   }
 
   for (let u of c.urls) {
-    out.write(col.cyan(`    🌐 ${u}\n`))
+    out.write(`\n┃`)
+    out.write(col.cyan(`    🌐 ${u}`))
   }
 
   if (opts.verbose) {
     for (let v of c.volumes) {
-      out.write(col.gray(`    🛢 ${col.bold(v.inside)}: ${(v.type === "bind" ? col.blue : col.gray)(v.local)}\n`))
+      out.write(`\n┃`)
+      out.write(col.gray(`    🛢 ${col.bold(v.inside)}: ${(v.type === "bind" ? col.blue : col.gray)(v.local)}`))
     }
   }
+
 }
 
 async function run(options: Options) {
@@ -103,6 +116,7 @@ async function run(options: Options) {
     }
 
     infos.push({
+      image: cont.Image,
       compose: labels["com.docker.compose.project"] ?? "--no project--",
       composePath: labels["com.docker.compose.project.working_dir"],
       composeService: labels["com.docker.compose.service"],

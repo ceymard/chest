@@ -1,15 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2021",
+    "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
     "declaration": true,
     "sourceMap": true,
     "strict": true,
+    "skipLibCheck": true,
     "noUnusedLocals": true,
-    "outDir": "./__build__",
-    "rootDir": ".",
-    "noStrictGenericChecks": true,
+    "outDir": "./lib",
+    "rootDir": "./src",
     "experimentalDecorators": true,
     "esModuleInterop": true,
     "lib": ["es6"]
