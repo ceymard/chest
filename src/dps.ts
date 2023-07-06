@@ -37,7 +37,7 @@ function display(c: ContainerInfos, opts: Options): string[] {
   if (opts.urls) {
     if (!c.urls.length) return []
     for (let u of c.urls) {
-      out.write(ch.cyan(`🌐 ${u} ${ch.gray(c.compose)} ${ch.gray(c.name)}\n`))
+      out.write(ch.cyan(`🌐 https://${u} ${ch.gray(c.compose)} ${ch.gray(c.name)}\n`))
     }
     return []
   }
@@ -65,7 +65,7 @@ function display(c: ContainerInfos, opts: Options): string[] {
   }
 
   for (let u of c.urls) {
-    res.push(ch.cyan(`  🌐 ${u}`))
+    res.push(ch.cyan(`  🌐 https://${u}`))
   }
 
   if (opts.verbose) {
@@ -144,9 +144,10 @@ async function run(options: Options) {
   const V = bgfg("┃")
   const H = bgfg("━")
 
+  console.log()
   for (let i of inf2) {
 
-    const title = `${bg(fg(" " + i.key + " "))}━${ch.bgGrey(ch.white(" " +i.values[0].composePath+" "))}`
+    const title = `${bg(fg(" " + i.key + " "))}${H}${ch.bgGrey(ch.white(" " +i.values[0].composePath+" "))}`
     const lines = i.values.map(v => display(v, options))
     const max = Math.max(strlen(title), ...lines.map(ln => Math.max(...ln.map(line => strlen(line)))))
 
@@ -154,11 +155,19 @@ async function run(options: Options) {
 
     console.log(`${TL}${title}${bgfg(fill("━", max - strlen(title)))}${TR}`)
 
+    let j = 0
     for (let cont of lines) {
-      let [first, ...rest] = cont
-      console.log(`${V}${fill(" ", max + 2)}${V}`)
-      console.log(`${bgfg("┣")}${H}${first}${fill(" ", max - strlen(first) + 1)}${V}`)
-      for (let r of rest) {
+      console.log(bgfg(`┣${fill("━", max+2)}┫`))
+      if (j > 0) {
+      } else {
+        // console.log(bgfg(`┃${fill(" ", max+2)}┃`))
+      }
+      j++
+
+      // let [first, ...rest] = cont
+      // console.log(`${V}${fill(" ", max + 2)}${V}`)
+      // console.log(`${bgfg("┣")}${H}${first}${fill(" ", max - strlen(first) -1)} ${H}${bgfg("┫")}`)
+      for (let r of cont) {
         console.log(`${V}${r}${fill(" ", max - strlen(r) + 2)}${V}`)
       }
     }
