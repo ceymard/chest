@@ -45,7 +45,7 @@ function display(c: ContainerInfos, opts: Options): string[] {
 
   const res: string[] = []
 
-  let runcol = c.running ? ch.green : ch.red
+  let runcol = c.running ? ch.bgAnsi256(82).ansi256(0) : ch.bgRed.ansi256(52)
   res.push(` ${c.running ? ch.green("⏵") : ch.red("⏸")} ${c.name.replace(c.composeService, e => ch.bold(runcol(e)))}.docker`)
 
   res.push(`  ${ch.grey(c.image.replace(/:[^]*$/, m => ch.bold(ch.blue(m))))}`)
