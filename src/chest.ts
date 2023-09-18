@@ -35,6 +35,7 @@ async function runBorgOnContainer(cont: Docker.Container | null, dir: string, ar
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
   binds.push(`${dir}:/repository:rw`)
+  binds.push(`${process.cwd()}:/cwd:rw`)
 
   const env = [
     'BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes',
@@ -55,6 +56,16 @@ async function runBorgOnContainer(cont: Docker.Container | null, dir: string, ar
     SHOULD_SHUTDOWN = true
   }
 
+  // Add docker-compose.yml to the back-ups
+  if (infos) {
+    const working_dir = infos.Config.Labels["com.docker.compose.project.working_dir"]
+    const conf_file = infos.Config.Labels["com.docker.compose.project.config_files"]
+    if (working_dir && conf_file) {
+      const fullpath = path.join(working_dir, conf_file)
+      binds.push(`${fullpath}:/staging/docker-compose.yml`)
+    }
+  }
+
   args = args.replace(/%repo/g, '/repository')
     .replace(/%data/g, '/staging')
 
@@ -65,6 +76,7 @@ async function runBorgOnContainer(cont: Docker.Container | null, dir: string, ar
       await container.stop()
     return running
   }
+
   try {
     if (cont && infos && SHOULD_SHUTDOWN) {
       console.log(`Stopping ${infos.Name}`)
@@ -109,10 +121,18 @@ async function runBorgOnContainer(cont: Docker.Container | null, dir: string, ar
 
 
 async function run(contdesc: string, command: string, args: string[]) {
-  var [contid, dir] = contdesc.split(':')
-  const container = await d.getContainer(contid)
-  const infos = await container.inspect()
-  const labels = infos.Config.Labels
+  let contid = ""
+  let dir = ""
+
+  if (contdesc[0] === "/" || contdesc[0] === ".") {
+    dir = contdesc
+  } else {
+    [contid, dir] = contdesc.split(':')
+  }
+
+  const container = contid ? await d.getContainer(contid) : null
+  const infos = await container?.inspect()
+  const labels = infos?.Config.Labels ?? {}
 
   const BASE_DIR = process.env.CHEST_BACKUPS_DIR || '/home/chest/backups/'
 
@@ -123,7 +143,8 @@ async function run(contdesc: string, command: string, args: string[]) {
   // If it is absolute, keep as is.
   dir = dir && (dir[0] === '/' || dir[0] === '.') ? path.resolve(dir) :
     // otherwise, use the base directory.
-    path.join(BASE_DIR, dir || infos.Name.replace(/^.*\//, ''))
+    path.join(BASE_DIR, dir || infos!.Name.replace(/^.*\//, ''))
+
   console.log(` => Using backup repository ${dir}`)
 
   const prefix = process.env.CHEST_PREFIX || labels['chest.prefix'] || labels["com.docker.compose.service"] || 'chest'
@@ -152,6 +173,7 @@ async function run(contdesc: string, command: string, args: string[]) {
       echo
       borg prune ${prune} -P "${prefix}" -s --list ::` : ''}
     `)
+
   } else if (command === 'list') {
     await runBorgOnContainer(container, dir, `borg list --format="{archive}{NL}" ::`)
   } else if (command === 'show') {
@@ -159,6 +181,14 @@ async function run(contdesc: string, command: string, args: string[]) {
   } else if (command === 'restore') {
     await runBorgOnContainer(container, dir, `
     cd %data && borg extract --list -v "::${args[0]}"
+  `)
+  } else if (command === "extract") {
+    await runBorgOnContainer(container, dir, `
+    cd /cwd && borg extract --list -v "::${args[0]}"
+  `)
+  } else if (command === "docker-compose.yml") {
+    await runBorgOnContainer(container, dir, `
+    cd /cwd && borg extract --list -v --pattern=+docker-compose.yml --pattern="-*" "::${args[0]}"
   `)
   } else {
     usage()
@@ -222,7 +252,6 @@ Borg specific options
                   with the same prefix.
   * borg.passphrase : a passphrase for the archive. If unspecified, the repository
                   will not be encrypted.
-
 `)
   process.exit(1)
 }
@@ -230,14 +259,10 @@ Borg specific options
 const [contdesc, command, ...args] = process.argv.slice(2)
 if (!contdesc) {
   usage()
+  process.exit(0)
 }
 
-if (contdesc[0] === '.' || contdesc[0] === '/') {
-  const stats = fs.statSync(contdesc)
-  if (stats.isDirectory()) {
-    runBorgOnContainer(null, path.resolve(contdesc), 'borg ' + args.join(' '))
-  }
-} else if (contdesc === 'backup-all') {
+if (contdesc === 'backup-all') {
   backupAll().catch(e => console.error(e))
 } else {
   run(contdesc, command, args).catch(e => console.error(e))
