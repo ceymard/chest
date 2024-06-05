@@ -42,6 +42,14 @@ const ContainerOption: Type<string, api.ContainerDescription> = {
   }
 }
 
+function map<R>(fn: (val: string) => R): Type<string, R> {
+  return {
+    async from(input: string) {
+      return fn(input)
+    }
+  }
+}
+
 
 const container = positional({
   description: "a container name",
@@ -57,23 +65,42 @@ const archive = option({
 })
 
 
+function autoArchiveName(cont: api.ContainerDescription) {
+  return (cont.chest.prefix || cont.infos.Id) + "-" + api.getTimestamp()
+}
+
+
 const optional_archive = option({
   long: "archive",
   short: "a",
   description: "an archive name (use <chest list> to list them)",
+  type: map((res) => {
+    _cont.chest.archive = res
+    return res
+  }),
   defaultValue() {
-    const res = (_cont.chest.prefix || _cont.infos.Id) + "-" + api.getTimestamp()
+    const res = autoArchiveName(_cont)
+    _cont.chest.archive = res
     show("archive", res)
     return res
   },
 })
 
+
+function autoRepository(cont: api.ContainerDescription) {
+  return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
+}
+
 const repository = option({
   long: "repository",
   short: "r",
   description: "a path to a repository if not inferring from labels",
+  type: map((res: string) => {
+    _cont.chest.repository = res
+    return res
+  }),
   defaultValue: () => {
-    let res = _cont.chest.repository ?? `${BACKUPS_DIR}/${_cont.chest.name}`
+    let res = autoRepository(_cont)
 
     if (res == null) {
       throw new Error("no repository found in container, please provide one")
@@ -108,6 +135,45 @@ const extract = command({
 })
 
 
+async function __backup(cont: api.ContainerDescription) {
+  ensure_valid_repository(cont.chest.repository!)
+
+  let prune = cont.chest.prune
+  if (prune === 'auto') {
+    prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
+  } else if (prune && !prune.includes('-')) {// no real arguments to prune
+    prune = ''
+  }
+
+  const is_tty = process.stderr.hasColors()
+
+  // FIXME should prune on prefix only !
+  await api.runBorgOnContainer(cont, `
+    if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
+      borg init --log-json -e ${cont.chest.passphrase ? "repokey-blake2" : "none"} /repository
+    fi
+    cd /data && borg create --progress --json --log-json --stats "::${cont.chest.archive}" ./*
+    ${prune ? `
+    # borg prune ${prune} --log-json -P "${cont.chest.prefix}" -s --list ::` : ''}
+  `, (out) => {
+
+    // console.log(out)
+    console.log(STAR, `duration ${ch.greenBright(Math.round(100 * out.archive.duration)/100)}s`)
+    console.log(STAR, `deduplicated size ${ch.greenBright(formatBytes(out.archive.stats.deduplicated_size))}, uncompressed ${ch.redBright(formatBytes(out.archive.stats.original_size))}`)
+    console.log(STAR, `repository size ${ch.greenBright(formatBytes(out.cache.stats.unique_csize))}`)
+    console.log(ch.greenBright("->"), ch.bold.magentaBright(out.archive.name))
+  }, !is_tty ? undefined : err => {
+    if (err.type === "progress_percent" || err.type === "progress_message") {
+      process.stderr.clearLine(0)
+      process.stderr.cursorTo(0)
+      if (!err.finished) {
+        process.stderr.write(err.message)
+      }
+    }
+  })
+}
+
+
 const backup = command({
   name: "backup",
   version: version,
@@ -117,39 +183,7 @@ const backup = command({
     repository,
   },
   handler: async args => {
-    ensure_valid_repository(args.repository)
-    let prune = _cont.chest.prune
-    if (prune === 'auto') {
-      prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
-    } else if (prune && !prune.includes('-')) {// no real arguments to prune
-      prune = ''
-    }
-
-    // FIXME should prune on prefix only !
-    await api.runBorgOnContainer(_cont, `
-      if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-        borg init --log-json -e ${_cont.chest.passphrase ? "repokey-blake2" : "none"} /repository
-      fi
-      cd /data && borg create --progress --json --log-json --stats "::${args.optional_archive}" ./*
-      ${prune ? `
-      # borg prune ${prune} --log-json -P "${_cont.chest.prefix}" -s --list ::` : ''}
-    `, (out) => {
-
-      // console.log(out)
-      console.log(STAR, `duration ${ch.greenBright(Math.round(100 * out.archive.duration)/100)}s`)
-      console.log(STAR, `deduplicated size ${ch.greenBright(formatBytes(out.archive.stats.deduplicated_size))}, uncompressed ${ch.redBright(formatBytes(out.archive.stats.original_size))}`)
-      console.log(STAR, `repository size ${ch.greenBright(formatBytes(out.cache.stats.unique_csize))}`)
-      console.log(ch.greenBright("->"), ch.bold.magentaBright(out.archive.name))
-    }, err => {
-      if (err.type === "progress_percent" || err.type === "progress_message") {
-        process.stderr.clearLine(0)
-        process.stderr.cursorTo(0)
-        if (!err.finished) {
-          process.stderr.write(err.message)
-        }
-      }
-      // console.log(err)
-    })
+    await __backup(_cont)
   }
 })
 
@@ -159,8 +193,18 @@ const backupAll = command({
   description: "backup all containers that have chest.auto-backup labels set",
   version: version,
   args: { },
-  handler: args => {
-    console.log("coucou")
+  handler: async args => {
+
+    const all = await api.docker.listContainers({all: true})
+    for (var cont of all) {
+      if (cont.Labels['chest.auto-backup']) {
+        console.log(ch.greenBright(" ***"), "backuping", ch.bold.yellowBright(cont.Names[0]))
+        const c = await api.getContainerDescription(cont.Id)
+        c.chest.archive = autoArchiveName(c)
+        c.chest.repository = autoRepository(c)
+        await __backup(c)
+      }
+    }
   }
 })
 

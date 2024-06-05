@@ -8,8 +8,9 @@ import StreamValues from "stream-json/streamers/StreamValues"
 const ch = new _ch.Chalk()
 
 export const docker = new Docker()
-const BORG_IMAGE = 'ceymard/borg'
+const BORG_IMAGE = 'ceymard/borg:1.2.8'
 
+let cleanup: null | (() => any) = null
 
 export interface ContainerDescription {
   container: Container
@@ -21,6 +22,7 @@ export interface ContainerDescription {
   binds: string[]
 
   chest: {
+    archive: string
     name?: string
     prefix?: string
     repository?: string
@@ -68,6 +70,7 @@ export async function runBorgOnContainer(
   stderr?: (data: any, id: number) => any,
 ) {
 
+
   if (!cont.chest.repository) {
     throw new Error("no repository")
   }
@@ -76,13 +79,20 @@ export async function runBorgOnContainer(
   const container_was_running = !!infos.State.Running
   const labels = cont.labels
 
+  const repository = cont.chest.repository
+  const repo_is_ssh = repository.includes("@")
+
   // Get the volumes of our container and mount them in /data
   const binds: string[] = cont.binds
 
   // A series of basic binds that we need
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
-  binds.push(`${cont.chest.repository}:/repository:rw`)
+
+  if (!repo_is_ssh) {
+    binds.push(`${cont.chest.repository}:/repository:rw`)
+  }
+
   binds.push(`${process.cwd()}:/cwd:rw`)
 
   // A few environment variables needed for chest to work
@@ -90,7 +100,7 @@ export async function runBorgOnContainer(
     "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes",
     "BORG_RELOCATED_REPO_ACCESS_IS_OK=yes",
     "BORG_HOSTNAME_IS_UNIQUE=no",
-    "BORG_REPO=/repository",
+    `BORG_REPO=${repo_is_ssh ? repository : "/repository"}`,
   ]
 
   const passphrase = process.env.BORG_PASSPHRASE || labels['borg.passphrase'] || ''
@@ -124,6 +134,21 @@ export async function runBorgOnContainer(
     if (cont && infos && infos.State.Running && shutdown_container) {
       console.log(` ${ch.redBright("⏸︎")} stopping ${infos.Name}`)
       await try_stop(cont.container)
+    }
+
+    cleanup = async () => {
+      if (borg) await try_stop(borg)
+
+
+      // Restart container if it was running before
+      try {
+        if (cont && infos && shutdown_container && container_was_running && !(await cont.container.inspect()).State.Running) {
+          console.log(` ${ch.greenBright("⏵︎")} restarting ${infos.Name}`)
+          await cont.container.start()
+        }
+      } catch { }
+      if (borg)
+        await borg.remove()
     }
 
     // console.log(`running /bin/ash -c ${args}`)
@@ -179,17 +204,8 @@ export async function runBorgOnContainer(
     await try_stop(borg)
   } finally {
     // Stop borg if it is still running but errored
-    if (borg) await try_stop(borg)
-
-    // Restart container if it was running before
-    try {
-      if (cont && infos && shutdown_container && container_was_running && !(await cont.container.inspect()).State.Running) {
-        console.log(` ${ch.greenBright("⏵︎")} restarting ${infos.Name}`)
-        await cont.container.start()
-      }
-    } catch { }
-    if (borg)
-      await borg.remove()
+    await cleanup?.()
+    cleanup = null
   }
 
 }
@@ -220,3 +236,8 @@ export async function getContainerDescription(input: string) {
 
     return result
 }
+
+process.on("uncaughtException", function (err) {
+  console.error(err)
+  cleanup?.()
+})
