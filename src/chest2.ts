@@ -327,7 +327,7 @@ const cmd_extract_compose = command({
       args.container.chest.keep_running = true
     }
     _cont.binds.push(`${process.cwd()}:/cwd:rw`)
-    await api.runBorg(_cont, `cd /cwd && borg extract --progress --log-json --list -v --pattern '*.yml' "::${args.archive}"`, out => {
+    await api.runBorg(_cont, `cd /cwd && borg extract --progress --log-json --list -v --exclude '**/*' "::${args.archive}"`, out => {
       for (const arch of out.archives) {
         console.log(STAR, arch.name, ch.grey(arch.time))
       }
