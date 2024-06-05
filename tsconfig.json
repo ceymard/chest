@@ -11,6 +11,7 @@
     "noEmit": true,
     "rootDir": "./src",
     "experimentalDecorators": true,
+    "resolveJsonModule": true,
     "esModuleInterop": true,
     "lib": ["es6"]
   },

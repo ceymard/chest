@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import * as path from 'path'
 import Docker from 'dockerode'
-import * as fs from 'fs'
 
 const d = new Docker()
 const BORG_IMAGE = 'ceymard/borg'

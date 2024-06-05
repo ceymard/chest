@@ -7,15 +7,18 @@
   },
   "scripts": {
     "build:chest": "esbuild --bundle --outfile=lib/chest.js --platform=node src/chest.ts",
+    "build:chest2": "esbuild --bundle --outfile=lib/chest2.js --platform=node src/chest2.ts",
     "build:dps": "esbuild --bundle --outfile=lib/dps.js --platform=node src/dps.ts",
-    "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps",
+    "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps ; npm run build:chest2",
     "watch": "tsc -w | wtsc npm run build"
   },
   "devDependencies": {
     "@types/colors": "^1.2.1",
     "@types/command-line-args": "^5.0.0",
     "@types/dockerode": "^2.5.9",
+    "@types/event-stream": "^4.0.5",
     "@types/node": "^18.11.2",
+    "@types/stream-json": "^1.7.7",
     "colors": "^1.3.2",
     "dockerode": "^2.5.7",
     "esbuild": "^0.15.11",
@@ -23,6 +26,11 @@
     "wtsc": "^0.1.2"
   },
   "dependencies": {
-    "chalk": "^5.3.0"
+    "JSONStream": "^1.3.5",
+    "chalk": "^5.3.0",
+    "cmd-ts": "^0.13.0",
+    "event-stream": "^4.0.1",
+    "stream-json": "^1.8.0",
+    "swl-argparse": "^0.1.1"
   }
 }
