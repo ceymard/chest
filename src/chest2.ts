@@ -1,5 +1,5 @@
 import { version } from "../package.json"
-import { Type, command, option, positional, run, string, subcommands } from "cmd-ts"
+import { Type, command, flag, option, positional, run, string, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
 import * as os from "os"
@@ -42,16 +42,16 @@ const ContainerOption: Type<string, api.ContainerDescription> = {
   }
 }
 
-function map<R>(fn: (val: string) => R): Type<string, R> {
+function map<R = string, T = R>(fn: (val: T) => R): Type<T, R> {
   return {
-    async from(input: string) {
+    async from(input: T) {
       return fn(input)
     }
   }
 }
 
 
-const container = positional({
+const opt_container = positional({
   description: "a container name",
   displayName: "container",
   type: ContainerOption,
@@ -64,13 +64,22 @@ const archive = option({
   description: "an archive name",
 })
 
+const opt_keep_running = flag({
+  long: "keep-running",
+  description: "do not stop the container from running",
+  type: map((opt: boolean) => {
+    _cont.chest.keep_running = opt
+    return opt
+  })
+})
+
 
 function autoArchiveName(cont: api.ContainerDescription) {
   return (cont.chest.prefix || cont.infos.Id) + "-" + api.getTimestamp()
 }
 
 
-const optional_archive = option({
+const opt_archive = option({
   long: "archive",
   short: "a",
   description: "an archive name (use <chest list> to list them)",
@@ -91,7 +100,7 @@ function autoRepository(cont: api.ContainerDescription) {
   return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
 }
 
-const repository = option({
+const opt_repository = option({
   long: "repository",
   short: "r",
   description: "a path to a repository if not inferring from labels",
@@ -117,7 +126,7 @@ const repository = option({
 ////////////////////////////////////////////////////
 
 
-const extract = command({
+const cmd_extract = command({
   name: "extract",
   description: "extract data from a backup",
   version,
@@ -137,6 +146,9 @@ const extract = command({
 
 async function __backup(cont: api.ContainerDescription) {
   ensure_valid_repository(cont.chest.repository!)
+
+  cont.chest.uid = process.getuid?.()
+  cont.chest.gid = process.getgid?.()
 
   let prune = cont.chest.prune
   if (prune === 'auto') {
@@ -174,13 +186,15 @@ async function __backup(cont: api.ContainerDescription) {
 }
 
 
-const backup = command({
+const cmd_backup = command({
   name: "backup",
   version: version,
+  description: "backup a container to a borg repository",
   args: {
-    container,
-    optional_archive,
-    repository,
+    opt_container,
+    opt_archive,
+    opt_keep_running,
+    opt_repository,
   },
   handler: async args => {
     await __backup(_cont)
@@ -188,7 +202,7 @@ const backup = command({
 })
 
 
-const backupAll = command({
+const cmd_backup_all = command({
   name: "backup-all",
   description: "backup all containers that have chest.auto-backup labels set",
   version: version,
@@ -209,13 +223,13 @@ const backupAll = command({
 })
 
 
-const restore = command({
+const cmd_restore = command({
   name: "restore",
   description: "restore a container to a preceding backup",
   version: version,
   args: {
-    container,
-    repository,
+    opt_container,
+    opt_repository,
     archive: option({
       description: "the archive name",
       short: "a",
@@ -224,6 +238,12 @@ const restore = command({
     })
   },
   handler: async args => {
+
+    if (_cont.infos.State.Running) {
+      console.error(ch.redBright("please shutdown the container and its whole stack before restoring to avoid inconsistencies and corrupted backups"))
+      return
+    }
+
     await api.runBorgOnContainer(_cont, `cd /data && borg extract --progress --log-json --list -v "::${args.archive}"`,
       out => {
         console.log(out)
@@ -241,13 +261,13 @@ const restore = command({
 })
 
 
-const list = command({
+const cmd_list = command({
   name: "list",
   version,
   description: "List archives in a container's backup",
   args: {
-    container,
-    repository,
+    container: opt_container,
+    repository: opt_repository,
   },
   handler: async args => {
     args.container.chest.keep_running = true
@@ -274,7 +294,12 @@ const showcompose = command({
 const opts = subcommands({
   name: "chest",
   version: version,
-  cmds: { backup, "backup-all": backupAll, restore, list, extract },
+  cmds: {
+    backup: cmd_backup,
+    "backup-all": cmd_backup_all,
+    restore: cmd_restore,
+    list: cmd_list,
+    extract: cmd_extract },
 })
 
 

@@ -2,6 +2,7 @@ import Docker, { Container, ContainerInspectInfo } from "dockerode"
 import path from "path"
 import * as _ch from "chalk"
 import * as es from "event-stream"
+import * as os from "os"
 import parser from "stream-json"
 import StreamValues from "stream-json/streamers/StreamValues"
 
@@ -31,6 +32,8 @@ export interface ContainerDescription {
     passphrase?: string
     keep_running?: boolean
     auto_backup?: boolean
+    uid?: number
+    gid?: number
   }
 
   compose: {
@@ -86,14 +89,11 @@ export async function runBorgOnContainer(
   const binds: string[] = cont.binds
 
   // A series of basic binds that we need
+  binds.push('/etc/hosts:/etc/hosts:ro')
   binds.push('/etc/localtime:/etc/localtime:ro')
   binds.push('/etc/timezone:/etc/timezone:ro')
 
-  if (!repo_is_ssh) {
-    binds.push(`${cont.chest.repository}:/repository:rw`)
-  }
-
-  binds.push(`${process.cwd()}:/cwd:rw`)
+  // binds.push(`${process.cwd()}:/cwd:rw`)
 
   // A few environment variables needed for chest to work
   const env = [
@@ -102,6 +102,19 @@ export async function runBorgOnContainer(
     "BORG_HOSTNAME_IS_UNIQUE=no",
     `BORG_REPO=${repo_is_ssh ? repository : "/repository"}`,
   ]
+
+  if (!repo_is_ssh) {
+    binds.push(`${cont.chest.repository}:/repository:rw`)
+  } else if (process.env["SSH_AUTH_SOCK"]) {
+
+    binds.push(`${process.env["SSH_AUTH_SOCK"]}:${process.env["SSH_AUTH_SOCK"]}`)
+    binds.push(`${os.homedir()}/.ssh:/ssh:ro`)
+    env.push(`SSH_AUTH_SOCK=${process.env["SSH_AUTH_SOCK"]}`)
+    args = `
+    mkdir /root/.ssh ; cp -Rf /ssh/* /root/.ssh/
+    ${args}
+    `
+  }
 
   const passphrase = process.env.BORG_PASSPHRASE || labels['borg.passphrase'] || ''
   if (passphrase) {
@@ -125,8 +138,12 @@ export async function runBorgOnContainer(
   const try_stop = async (container: Docker.Container) => {
     const running = (await container.inspect()).State.Running
     if (running)
-      await container.stop()
+      await container.stop({  })
     return running
+  }
+
+  if (cont.chest.uid && !repo_is_ssh) {
+    args += `\nchown -R ${cont.chest.uid}:${cont.chest.gid} /repository/*\n`
   }
 
   try {
@@ -134,11 +151,12 @@ export async function runBorgOnContainer(
     if (cont && infos && infos.State.Running && shutdown_container) {
       console.log(` ${ch.redBright("⏸︎")} stopping ${infos.Name}`)
       await try_stop(cont.container)
+      // Let's give ourselves some time.
+      await new Promise(ac => setTimeout(ac, 5000))
     }
 
     cleanup = async () => {
       if (borg) await try_stop(borg)
-
 
       // Restart container if it was running before
       try {
@@ -151,7 +169,6 @@ export async function runBorgOnContainer(
         await borg.remove()
     }
 
-    // console.log(`running /bin/ash -c ${args}`)
     borg = await docker.createContainer({
       Image: BORG_IMAGE,
       AttachStdout: true,
@@ -186,8 +203,12 @@ export async function runBorgOnContainer(
         if (value.type !== "question_prompt"
         &&value.type !== "question_env_answer"
       ) {
-          if (value.type === "log_message" && value.levelname === "ERROR") {
-            console.error(ch.redBright(" ⚠"), value.message)
+          if (value.type === "log_message") {
+            if (value.levelname === "ERROR") {
+              console.error(ch.redBright(" ⚠"), value.message)
+            } else if (value.levelname === "WARNING") {
+              console.error(ch.yellowBright(" ⚠"), value.message)
+            }
           }
           stderr?.(value, data.key)
           // console.error(value)
