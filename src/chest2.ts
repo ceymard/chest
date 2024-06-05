@@ -1,9 +1,10 @@
 import { version } from "../package.json"
-import { Type, command, flag, option, positional, run, string, subcommands } from "cmd-ts"
+import { Type, command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
 import * as os from "os"
 import * as fs from "fs"
+import * as readline from "readline"
 
 const ch = new _ch.Chalk()
 const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `${os.homedir()}/backups`
@@ -32,9 +33,13 @@ function ensure_valid_repository(repo: string) {
   }
 }
 
-let _cont!: api.ContainerDescription
+let _cont: api.RuntimeInfos = {
+  binds: [],
+  chest: {},
+  compose: {},
+}
 
-const ContainerOption: Type<string, api.ContainerDescription> = {
+const ContainerOption: Type<string, api.RuntimeInfos> = {
   async from(input: string) {
     const  result = await api.getContainerDescription(input)
     _cont = result
@@ -51,10 +56,18 @@ function map<R = string, T = R>(fn: (val: T) => R): Type<T, R> {
 }
 
 
-const opt_container = positional({
+const opt_container_required = option({
   description: "a container name",
-  displayName: "container",
+  short: "c",
+  long: "container",
   type: ContainerOption,
+})
+
+const opt_container_optional = option({
+  description: "a container name",
+  short: "c",
+  long: "container",
+  type: optional(ContainerOption),
 })
 
 
@@ -67,15 +80,15 @@ const archive = option({
 const opt_keep_running = flag({
   long: "keep-running",
   description: "do not stop the container from running",
-  type: map((opt: boolean) => {
+  type: optional(map((opt: boolean) => {
     _cont.chest.keep_running = opt
     return opt
-  })
+  }))
 })
 
 
-function autoArchiveName(cont: api.ContainerDescription) {
-  return (cont.chest.prefix || cont.infos.Id) + "-" + api.getTimestamp()
+function autoArchiveName(infos: api.RuntimeInfos) {
+  return (infos.chest.prefix || infos.infos?.Id || "chest") + "-" + api.getTimestamp()
 }
 
 
@@ -96,7 +109,7 @@ const opt_archive = option({
 })
 
 
-function autoRepository(cont: api.ContainerDescription) {
+function autoRepository(cont: api.RuntimeInfos) {
   return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
 }
 
@@ -144,8 +157,26 @@ const cmd_extract = command({
 })
 
 
-async function __backup(cont: api.ContainerDescription) {
-  ensure_valid_repository(cont.chest.repository!)
+async function __backup(cont: api.RuntimeInfos) {
+  const is_ssh = cont.chest.repository?.includes("@")
+
+  if (is_ssh) {
+    console.error(ch.bold.redBright(` ⚠⚠⚠ warning : you are about to backup to a remote server. This is dangerous, you may be inadvertently trying to backup to an existing backup.\n`))
+    const int = readline.createInterface({input: process.stdin, output: process.stderr})
+    const res = await new Promise<string>(acc => {
+      int.question("Continue ? y/n ", ans => {
+        acc(ans)
+      })
+    })
+    if (res.toLowerCase() !== "y") {
+      console.error("aborting.")
+      return
+    }
+    int.close()
+  }
+
+  if (!is_ssh)
+    ensure_valid_repository(cont.chest.repository!)
 
   cont.chest.uid = process.getuid?.()
   cont.chest.gid = process.getgid?.()
@@ -160,10 +191,10 @@ async function __backup(cont: api.ContainerDescription) {
   const is_tty = process.stderr.hasColors()
 
   // FIXME should prune on prefix only !
-  await api.runBorgOnContainer(cont, `
-    if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-      borg init --log-json -e ${cont.chest.passphrase ? "repokey-blake2" : "none"} /repository
-    fi
+  await api.runBorg(cont, `
+    #if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
+      borg init --log-json -e ${cont.chest.passphrase ? "repokey-blake2" : "none"} ${is_ssh ? cont.chest.repository : "/repository"}
+    #fi
     cd /data && borg create --progress --json --log-json --stats "::${cont.chest.archive}" ./*
     ${prune ? `
     # borg prune ${prune} --log-json -P "${cont.chest.prefix}" -s --list ::` : ''}
@@ -191,7 +222,7 @@ const cmd_backup = command({
   version: version,
   description: "backup a container to a borg repository",
   args: {
-    opt_container,
+    opt_container: opt_container_required,
     opt_archive,
     opt_keep_running,
     opt_repository,
@@ -228,7 +259,7 @@ const cmd_restore = command({
   description: "restore a container to a preceding backup",
   version: version,
   args: {
-    opt_container,
+    opt_container: opt_container_required,
     opt_repository,
     archive: option({
       description: "the archive name",
@@ -239,12 +270,12 @@ const cmd_restore = command({
   },
   handler: async args => {
 
-    if (_cont.infos.State.Running) {
+    if (_cont.infos?.State.Running) {
       console.error(ch.redBright("please shutdown the container and its whole stack before restoring to avoid inconsistencies and corrupted backups"))
       return
     }
 
-    await api.runBorgOnContainer(_cont, `cd /data && borg extract --progress --log-json --list -v "::${args.archive}"`,
+    await api.runBorg(_cont, `cd /data && borg extract --progress --log-json --list -v "::${args.archive}"`,
       out => {
         console.log(out)
       }, err => {
@@ -264,14 +295,16 @@ const cmd_restore = command({
 const cmd_list = command({
   name: "list",
   version,
-  description: "List archives in a container's backup",
+  description: "List archives in a repository or a container",
   args: {
-    container: opt_container,
+    container: opt_container_optional,
     repository: opt_repository,
   },
   handler: async args => {
-    args.container.chest.keep_running = true
-    await api.runBorgOnContainer(args.container, `borg list --json --log-json --format="{archive}{NL}" ::`, out => {
+    if (args.container) {
+      args.container.chest.keep_running = true
+    }
+    await api.runBorg(_cont, `borg list --json --log-json --format="{archive}{NL}" ::`, out => {
       for (const arch of out.archives) {
         console.log(STAR, arch.name, ch.grey(arch.time))
       }
@@ -280,13 +313,25 @@ const cmd_list = command({
 })
 
 
-const showcompose = command({
-  name: "show-compose",
+const cmd_extract_compose = command({
+  name: "extract-compose",
   version,
-  description: "Show the docker-compose.yml associated with this project",
-  args: { },
-  handler: args => {
-
+  description: "extract compose files from a backup",
+  args: {
+    repository: opt_repository,
+    container: opt_container_optional,
+    archive: opt_archive,
+  },
+  handler: async args => {
+    if (args.container) {
+      args.container.chest.keep_running = true
+    }
+    _cont.binds.push(`${process.cwd()}:/cwd:rw`)
+    await api.runBorg(_cont, `cd /cwd && borg extract --progress --log-json --list -v --pattern '*.yml' "::${args.archive}"`, out => {
+      for (const arch of out.archives) {
+        console.log(STAR, arch.name, ch.grey(arch.time))
+      }
+    })
   }
 })
 
@@ -297,9 +342,11 @@ const opts = subcommands({
   cmds: {
     backup: cmd_backup,
     "backup-all": cmd_backup_all,
+    "extract-compose": cmd_extract_compose,
     restore: cmd_restore,
     list: cmd_list,
-    extract: cmd_extract },
+    extract: cmd_extract
+  },
 })
 
 

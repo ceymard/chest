@@ -13,17 +13,19 @@ const BORG_IMAGE = 'ceymard/borg:1.2.8'
 
 let cleanup: null | (() => any) = null
 
-export interface ContainerDescription {
-  container: Container
-  infos: ContainerInspectInfo
-  labels: {
+
+export interface RuntimeInfos {
+  container?: Container
+  infos?: ContainerInspectInfo
+  labels?: {
     [label: string]: string;
   }
   /** the binds that we'll need afterward */
   binds: string[]
 
   chest: {
-    archive: string
+    archive?: string
+    backups_dir?: string
     name?: string
     prefix?: string
     repository?: string
@@ -66,8 +68,8 @@ export function getTimestamp() {
  * @param cont the container
  * @param repo the directory of the repository
  */
-export async function runBorgOnContainer(
-  cont: ContainerDescription,
+export async function runBorg(
+  cont: RuntimeInfos,
   args: string,
   stdout?: (data: any, id: number) => any,
   stderr?: (data: any, id: number) => any,
@@ -79,7 +81,7 @@ export async function runBorgOnContainer(
   }
 
   const infos = cont.infos
-  const container_was_running = !!infos.State.Running
+  const container_was_running = !!infos?.State.Running
   const labels = cont.labels
 
   const repository = cont.chest.repository
@@ -116,7 +118,7 @@ export async function runBorgOnContainer(
     `
   }
 
-  const passphrase = process.env.BORG_PASSPHRASE || labels['borg.passphrase'] || ''
+  const passphrase = process.env.BORG_PASSPHRASE || labels?.['borg.passphrase'] || ''
   if (passphrase) {
     env.push(`BORG_PASSPHRASE=${passphrase}`)
   }
@@ -148,7 +150,7 @@ export async function runBorgOnContainer(
 
   try {
 
-    if (cont && infos && infos.State.Running && shutdown_container) {
+    if (cont && cont.container && infos && infos.State.Running && shutdown_container) {
       console.log(` ${ch.redBright("⏸︎")} stopping ${infos.Name}`)
       await try_stop(cont.container)
       // Let's give ourselves some time.
@@ -160,7 +162,7 @@ export async function runBorgOnContainer(
 
       // Restart container if it was running before
       try {
-        if (cont && infos && shutdown_container && container_was_running && !(await cont.container.inspect()).State.Running) {
+        if (cont && cont.container && infos && shutdown_container && container_was_running && !(await cont.container.inspect()).State.Running) {
           console.log(` ${ch.greenBright("⏵︎")} restarting ${infos.Name}`)
           await cont.container.start()
         }
@@ -200,11 +202,12 @@ export async function runBorgOnContainer(
       new StreamValues(),
       es.mapSync((data: any) => {
         const value = data.value
-        if (value.type !== "question_prompt"
-        &&value.type !== "question_env_answer"
+        if (
+          value.type !== "question_prompt"
+        && value.type !== "question_env_answer"
       ) {
           if (value.type === "log_message") {
-            if (value.levelname === "ERROR") {
+            if (value.levelname === "ERROR" && value.msgid !== "Repository.AlreadyExists") {
               console.error(ch.redBright(" ⚠"), value.message)
             } else if (value.levelname === "WARNING") {
               console.error(ch.yellowBright(" ⚠"), value.message)
@@ -239,7 +242,7 @@ export async function getContainerDescription(input: string) {
     const labels = infos.Config.Labels ?? {}
     const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/data`, m.Destination)}:rw`)
 
-    const chest: ContainerDescription["chest"] = {
+    const chest: RuntimeInfos["chest"] = {
       name: labels["chest.name"] ?? labels["com.docker.compose.project"],
       prefix: labels["chest.prefix"] ?? labels["com.docker.compose.service"] ?? process.env["CHEST_PREFIX"],
       prune: labels["borg.prune"] ?? process.env["BORG_PRUNE"],
@@ -248,12 +251,12 @@ export async function getContainerDescription(input: string) {
       repository: labels["chest.repository"] ?? process.env["CHEST_REPOSITORY"],
     }
 
-    const compose: ContainerDescription["compose"] = {
+    const compose: RuntimeInfos["compose"] = {
       workding_dir: labels["com.docker.compose.project.working_dir"],
       config_files: labels["com.docker.compose.project.config_files"]?.split(/,/g)
     }
 
-    const result: ContainerDescription = {container, infos, labels, binds, chest, compose}
+    const result: RuntimeInfos = {container, infos, labels, binds, chest, compose}
 
     return result
 }
