@@ -7,9 +7,8 @@
   },
   "scripts": {
     "build:chest": "esbuild --bundle --outfile=lib/chest.js --platform=node src/chest.ts",
-    "build:chest2": "esbuild --bundle --outfile=lib/chest2.js --platform=node src/chest2.ts",
     "build:dps": "esbuild --bundle --outfile=lib/dps.js --platform=node src/dps.ts",
-    "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps ; npm run build:chest2",
+    "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps ",
     "watch": "tsc -w | wtsc npm run build"
   },
   "devDependencies": {
