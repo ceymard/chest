@@ -1,33 +1,53 @@
 import Docker, { Container, ContainerInspectInfo } from "dockerode"
 import path from "path"
 import ch from "chalk"
-import * as es from "event-stream"
 import * as os from "os"
 import * as fs from "fs"
 import * as helpers from "./helper"
-import parser from "stream-json"
-import StreamValues from "stream-json/streamers/StreamValues"
 import Dockerode from "dockerode"
 import * as toml from "smol-toml"
 import * as s from "@salesway/scotty"
 
 export const docker = new Docker()
-const BORG_IMAGE = 'ceymard/borg:1.2.8'
 const STAR = ch.greenBright(" *")
-
-let cleanup: null | (() => any) = null
 
 const current_user = os.userInfo({encoding: "utf-8"})
 
+function log_value<T, K extends keyof T>(opts: T, name: K) {
+  if (opts[name]) {
+    const value = opts[name]
+    console.log(` ${ch.bold.cyanBright("=")} ${ch.cyan(name)}: ${ch.magentaBright(Array.isArray(value) ? "\n  " + value.join(",\n  ") : value)}`)
+  }
+}
+
+export function command_tag(tpl: TemplateStringsArray, ...values: string[]) {
+  const res: string[] = []
+  for (let i = 0; i < tpl.length; i++) {
+    res.push(tpl[i])
+    if (values[i]) res.push(values[i])
+  }
+  return res.join("")
+}
+
+/** The config class to get some defaults. */
 export class ChestConfig {
 
   @s.str user = current_user.username
   @s.str backups_root_dir: string = path.join(current_user.homedir, "backups")
   @s.str passphrase?: string
+  @s.str prune = "--keep-daily 7 --keep-weekly 2 --keep-monthly 1"
+  @s.str borg_image = "ceymard/borg:1.2.8"
+
+  archive = ""
+  keep_running = false
+  repository = "!repository-was-not-set"
+  prefix = ""
+
+  clone(): this {
+    return Object.assign(new ChestConfig(), this)
+  }
 }
 
-
-const config = new ChestConfig()
 
 /** */
 export function read_config() {
@@ -38,6 +58,7 @@ export function read_config() {
     `/etc/chest.toml`
   ]
   const ser = s.Serializer.get(ChestConfig)
+  const config = new ChestConfig()
 
   for (let name of files) {
     try {
@@ -48,58 +69,61 @@ export function read_config() {
 
     }
   }
+
+  return config
 }
 
 read_config()
 
 
-export interface RuntimeInfos {
-  container?: Container
-  infos?: ContainerInspectInfo
-  labels?: {
-    [label: string]: string;
-  }
-  /** the binds that we'll need afterward */
-  binds: string[]
-
-  chest: {
-    archive?: string
-    backups_dir?: string
-    name?: string
-    prefix?: string
-    repository?: string
-    prune?: string
-    auto?: boolean
-    passphrase?: string
-    keep_running?: boolean
-    auto_backup?: boolean
-    uid?: number
-    gid?: number
-  }
-
-  compose: {
-    workding_dir?: string
-    config_files?: string[]
-  }
-
+export function get_archive_name(infos: RunBorgOnContainerOptions) {
+  return (infos.config.prefix || infos.infos?.Id || "chest") + "-" + helpers.getTimestamp()
 }
 
-/**
- * A simple timestamping function that returns string like '181101-030024'.
- *
- * We use this format because selecting it in a terminal won't choke, whereas
- * using a regular date time format tends to not select text past the ':'
- */
-export function getTimestamp() {
-  var d = new Date()
-  var pad = (n: number) => n < 10 ? '0' + n : n.toString()
-  return d.getFullYear().toString().slice(2, 4)
-    + pad(d.getMonth() + 1)
-    + pad(d.getDate())
-    + '-'
-    + pad(d.getHours())
-    + pad(d.getMinutes())
-    + pad(d.getSeconds())
+
+/** If not provided by the command, fill default optoins */
+export function fill_defaults_from_container(infos: ContainerInspectInfo, config: ChestConfig) {
+
+  const labels = infos.Config.Labels
+
+  const backups_root_dir = process.env.CHEST_BACKUPS_DIR
+    ?? labels["chest.backups_root_dir"]
+    ?? config.backups_root_dir
+
+  const passphrase = process.env.BORG_PASSPHRASE
+    ?? labels["chest.passphrase"]
+    ?? labels["borg.passphrase"]
+    ?? config.passphrase
+
+  const prune = process.env.BORG_PRUNE
+    ?? labels["borg.prune"]
+    config.prune
+
+  const repository = process.env.BORG_REPOSITORY
+    ?? labels["borg.repository"]
+    ?? labels["chest.repository"]
+    ?? path.join(config.backups_root_dir, labels["chest.name"] ?? labels["com.docker.compose.project"])
+
+  const prefix = process.env.CHEST_PREFIX
+    ?? labels["chest.prefix"]
+    ?? labels["com.docker.compose.service"]
+
+  const archive = process.env.CHEST_ARCHIVE
+    ?? `${prefix}-${helpers.getTimestamp()}`
+
+  if (!repository) {
+    throw new Error(`no valid repository (${repository})`)
+  }
+
+  return {
+    backups_root_dir,
+    passphrase,
+    prune,
+    repository,
+    prefix,
+    archive,
+  }
+
 }
 
 
@@ -107,26 +131,32 @@ export interface RunBorgOptions {
   /** a repository, can be over SSH */
   repository: string
 
-  command: string
-
   env?: {[name: string]: string}
 
   /** docker binds */
-  binds: string[]
+  binds?: string[]
 
   passphrase?: string
 
   /** */
   stdout?: (data: any, id: number) => any,
   stderr?: (data: any, id: number) => any,
+
+  config: ChestConfig
 }
 
+export interface Command {
+  command: string
+}
 
 /**
  * set up the borg container and run the command in it
  * we suppose that we have already inspected a container's volumes and that they're in the binds before running this function
  * */
-export async function run_borg_backup(args: RunBorgOptions) {
+export async function run_borg_backup(args: RunBorgOptions & Command) {
+
+  log_value(args, "repository")
+  log_value(args, "binds")
 
   // We're not going to do to the same thing
   const repo_is_ssh = args.repository.includes("@")
@@ -144,7 +174,7 @@ export async function run_borg_backup(args: RunBorgOptions) {
   }
 
   // A series of default binds
-  const binds = args.binds.slice()
+  const binds = (args.binds??[]).slice()
   binds.push(
     "/etc/hosts:/etc/hosts:ro",
     "/etc/localtime:/etc/localtime:ro",
@@ -177,47 +207,52 @@ export async function run_borg_backup(args: RunBorgOptions) {
   }
 
   const borg = await docker.createContainer({
-    Image: BORG_IMAGE,
+    Image: args.config.borg_image,
     AttachStdout: true,
     AttachStderr: true,
     HostConfig: {
       Binds: binds
     },
-    WorkingDir: '/data',
-    Entrypoint: '/bin/ash',
+    WorkingDir: "/data",
+    Entrypoint: "/bin/ash",
     Env: Object.entries(env).map(([key, value]) => `${key}=${value}`),
     Cmd: ['-c', command]
   })
 
-  containers_to_stop_and_delete.add(borg.id)
-  await borg.start();
-  const stream = await borg.logs({stdout: true, stderr: true, follow: true})
+  try {
+    containers_to_stop_and_delete.add(borg.id)
+    await borg.start();
 
-  // Attach a json stream reader
-  borg.modem.demuxStream(stream, helpers.jsonStream(args.stdout), helpers.jsonStream(data => {
-    const value = data.value
-    if (
-      value.type !== "question_prompt"
-      && value.type !== "question_env_answer"
-    ) {
-      if (value.type === "log_message") {
-        if (value.levelname === "ERROR" && value.msgid !== "Repository.AlreadyExists") {
-          console.error(ch.redBright(" ⚠"), value.message)
-        } else if (value.levelname === "WARNING") {
-          console.error(ch.yellowBright(" ⚠"), value.message)
+    const stream = await borg.logs({stdout: true, stderr: true, follow: true})
+
+    const stdout = helpers.jsonStream(args.stdout)
+    const stderr = helpers.jsonStream((data, key) => {
+      if (
+        data.type !== "question_prompt"
+        && data.type !== "question_env_answer"
+      ) {
+        if (data.type === "log_message") {
+          if (data.levelname === "ERROR" && data.msgid !== "Repository.AlreadyExists") {
+            console.error(ch.redBright(" ⚠"), data.message)
+          } else if (data.levelname === "WARNING") {
+            console.error(ch.yellowBright(" ⚠"), data.message)
+          }
         }
+        args.stderr?.(data, key)
+        // console.error(value)
       }
-      args.stderr?.(value, data.key)
-      // console.error(value)
-    }
-  }))
+    })
 
-  await borg.stop()
-  await borg.remove({  })
-  // FIXME need to chown once we're done !
-  // if (cont.chest.uid && !repo_is_ssh) {
-  //   command += `\nchown -R ${cont.chest.uid}:${cont.chest.gid} /repository/*\n`
-  // }
+    // Attach a json stream reader
+    borg.modem.demuxStream(stream, stdout, stderr) //*/
+
+    await borg.wait()
+
+  } finally {
+    await container_stop(borg)
+    await borg.remove({  })
+  }
+
 }
 
 
@@ -231,24 +266,31 @@ export interface RunBorgOnContainerOptions extends RunBorgOptions {
 
 
 /** */
-export async function run_borg_backup_on_container(args: RunBorgOnContainerOptions) {
+export async function run_borg_backup_on_container(args: RunBorgOnContainerOptions & Command) {
 
-  const binds = args.binds
+  args.binds ??= []
+
+  args.binds.push(
+    ...args.infos.Mounts.map(m => `${m.Source}:${path.join(`/data`, m.Destination)}:rw`)
+  )
+
   const labels = args.infos.Config.Labels
 
   // const compose_working_dir = labels["com.docker.compose.project.working_dir"]
   const compose_config_files = labels["com.docker.compose.project.config_files"]
   if (compose_config_files) {
-    binds.push(
+    args.binds.push(
       ...compose_config_files.split(/,/g).map(c => `${c}:/data/${path.basename(c)}:ro`)
     )
   }
 
   const should_stop_and_restart = !args.keep_running && !!args.infos.State.Running
 
+  log_value(args, "keep_running")
+
   if (should_stop_and_restart) {
     containers_to_restart.add(args.container.id)
-    await stopContainer(args.container)
+    await container_stop(args.container)
   }
 
   try {
@@ -257,7 +299,7 @@ export async function run_borg_backup_on_container(args: RunBorgOnContainerOptio
   } finally {
     // Restart the container if it was stopped
     if (containers_to_restart.has(args.container.id)) {
-      await startContainer(args.container)
+      await container_start(args.container)
       containers_to_restart.delete(args.container.id)
     }
   }
@@ -265,208 +307,71 @@ export async function run_borg_backup_on_container(args: RunBorgOnContainerOptio
 }
 
 
+export interface DoRestoreOptions extends RunBorgOnContainerOptions {
+  archive: string
+}
+
+
 /**
- * Run the given command in the container.
- * @param cont the container
- * @param repo the directory of the repository
+ * Restore a given container to the given archive
  */
-export async function runBorg(
-  cont: RuntimeInfos,
-  args: string,
-  stdout?: (data: any, id: number) => any,
-  stderr?: (data: any, id: number) => any,
-) {
-
-
-  if (!cont.chest.repository) {
-    throw new Error("no repository")
+export async function do_restore(opts: DoRestoreOptions) {
+  if (opts.infos.State.Running) {
+    console.error(ch.redBright("please shutdown the container and its whole stack before restoring to avoid inconsistencies and corrupted backups"))
+    return
   }
 
-  const infos = cont.infos
-  const container_was_running = !!infos?.State.Running
-  const labels = cont.labels
-
-  const repository = cont.chest.repository
-  const repo_is_ssh = repository.includes("@")
-
-  // Get the volumes of our container and mount them in /data
-  const binds: string[] = cont.binds
-
-  // A series of basic binds that we need
-  binds.push('/etc/hosts:/etc/hosts:ro')
-  binds.push('/etc/localtime:/etc/localtime:ro')
-  binds.push('/etc/timezone:/etc/timezone:ro')
-
-  // binds.push(`${process.cwd()}:/cwd:rw`)
-
-  // A few environment variables needed for chest to work
-  const env = [
-    "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK=yes",
-    "BORG_RELOCATED_REPO_ACCESS_IS_OK=yes",
-    "BORG_HOSTNAME_IS_UNIQUE=no",
-    `BORG_REPO=${repo_is_ssh ? repository : "/repository"}`,
-  ]
-
-  if (!repo_is_ssh) {
-    binds.push(`${cont.chest.repository}:/repository:rw`)
-  } else if (process.env["SSH_AUTH_SOCK"]) {
-
-    binds.push(`${process.env["SSH_AUTH_SOCK"]}:${process.env["SSH_AUTH_SOCK"]}`)
-    binds.push(`${os.homedir()}/.ssh:/ssh:ro`)
-    env.push(`SSH_AUTH_SOCK=${process.env["SSH_AUTH_SOCK"]}`)
-    args = `
-    mkdir /root/.ssh ; cp -Rf /ssh/* /root/.ssh/
-    ${args}
-    `
-  }
-
-  const passphrase = process.env.BORG_PASSPHRASE || labels?.['borg.passphrase'] || ''
-  if (passphrase) {
-    env.push(`BORG_PASSPHRASE=${passphrase}`)
-  }
-
-  let shutdown_container = false
-  if (!cont.chest.keep_running) {
-    shutdown_container = true
-  }
-
-  // Add docker-compose.yml to the back-ups if the container is part of a compose file
-  if (cont.compose.config_files) {
-    binds.push(
-      ...cont.compose.config_files.map(c => `${c}:/data/${path.basename(c)}:ro`)
-    )
-  }
-
-  let borg: Docker.Container | undefined
-
-  const try_stop = async (container: Docker.Container) => {
-    const running = (await container.inspect()).State.Running
-    if (running)
-      await container.stop({  })
-    return running
-  }
-
-  if (cont.chest.uid && !repo_is_ssh) {
-    args += `\nchown -R ${cont.chest.uid}:${cont.chest.gid} /repository/*\n`
-  }
-
-  try {
-
-    if (cont && cont.container && infos && infos.State.Running && shutdown_container) {
-      console.log(` ${ch.redBright("⏸︎")} stopping ${infos.Name}`)
-      await try_stop(cont.container)
-      // Let's give ourselves some time.
-      await new Promise(ac => setTimeout(ac, 1000))
-    }
-
-    cleanup = async () => {
-      if (borg) await try_stop(borg)
-
-      // Restart container if it was running before
-      try {
-        if (cont && cont.container && infos && shutdown_container && container_was_running && !(await cont.container.inspect()).State.Running) {
-          console.log(` ${ch.greenBright("⏵︎")} restarting ${infos.Name}`)
-          await cont.container.start()
-        }
-      } catch { }
-      if (borg)
-        await borg.remove()
-    }
-
-    borg = await docker.createContainer({
-      Image: BORG_IMAGE,
-      AttachStdout: true,
-      AttachStderr: true,
-      HostConfig: {
-        Binds: binds
-      },
-      WorkingDir: '/data',
-      Entrypoint: '/bin/ash',
-      Env: env,
-      Cmd: ['-c', args]
-    })
-
-    await borg.start();
-    const stream = await borg.logs({stdout: true, stderr: true, follow: true})
-
-
-    const _stdout2 = es.pipeline(
-      parser({ jsonStreaming: true }),
-      new StreamValues(),
-      es.mapSync((data: any) => {
-        stdout?.(data.value, data.key)
-        return data
-      })
-    )
-
-    const _stderr2 = es.pipeline(
-      parser({ jsonStreaming: true }),
-      new StreamValues(),
-      es.mapSync((data: any) => {
-        const value = data.value
-        if (
-          value.type !== "question_prompt"
-        && value.type !== "question_env_answer"
-      ) {
-          if (value.type === "log_message") {
-            if (value.levelname === "ERROR" && value.msgid !== "Repository.AlreadyExists") {
-              console.error(ch.redBright(" ⚠"), value.message)
-            } else if (value.levelname === "WARNING") {
-              console.error(ch.yellowBright(" ⚠"), value.message)
-            }
-          }
-          stderr?.(value, data.key)
-          // console.error(value)
-        }
-
-        return data
-      })
-    )
-
-    borg.modem.demuxStream(stream, _stdout2, _stderr2)
-    // borg.modem.demuxStream(stream, process.stdout, process.stderr)
-
-    await borg.wait()
-    await try_stop(borg)
-  } finally {
-    // Stop borg if it is still running but errored
-    await cleanup?.()
-    cleanup = null
-  }
-
+  await run_borg_backup_on_container({
+    ...opts,
+    command: `cd /data && borg extract --progress --log-json --list -e '*.yml' -v "::${opts.archive}"`,
+    stdout(data, id) {
+      console.log(data)
+    },
+    stderr: helpers.stderr_progress,
+  })
 }
 
+// export async function getContainerDescription(input: string) {
 
-export async function getContainerDescription(input: string) {
+//   const container = await docker.getContainer(input.replace(/\.docker$/, ""))
+//     const infos = await container.inspect()
+//     const labels = infos.Config.Labels ?? {}
+//     const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/data`, m.Destination)}:rw`)
 
-  const container = await docker.getContainer(input.replace(/\.docker$/, ""))
-    const infos = await container.inspect()
-    const labels = infos.Config.Labels ?? {}
-    const binds = infos.Mounts.map(m => `${m.Source}:${path.join(`/data`, m.Destination)}:rw`)
+//     const chest: RuntimeInfos["chest"] = {
+//       name: labels["chest.name"] ?? labels["com.docker.compose.project"],
+//       prefix: labels["chest.prefix"] ?? labels["com.docker.compose.service"] ?? process.env["CHEST_PREFIX"],
+//       prune: labels["borg.prune"] ?? process.env["BORG_PRUNE"],
+//       passphrase: labels["borg.passphrase"] ?? labels["chest.passphrase"] ?? process.env["CHEST_PASSPHRASE"] ?? process.env["BORG_PASSPHRASE"],
+//       keep_running: !!labels["chest.keep-running"] || !!process.env["CHEST_KEEP_RUNNING"],
+//       repository: labels["chest.repository"] ?? process.env["CHEST_REPOSITORY"],
+//     }
 
-    const chest: RuntimeInfos["chest"] = {
-      name: labels["chest.name"] ?? labels["com.docker.compose.project"],
-      prefix: labels["chest.prefix"] ?? labels["com.docker.compose.service"] ?? process.env["CHEST_PREFIX"],
-      prune: labels["borg.prune"] ?? process.env["BORG_PRUNE"],
-      passphrase: labels["borg.passphrase"] ?? labels["chest.passphrase"] ?? process.env["CHEST_PASSPHRASE"] ?? process.env["BORG_PASSPHRASE"],
-      keep_running: !!labels["chest.keep-running"] || !!process.env["CHEST_KEEP_RUNNING"],
-      repository: labels["chest.repository"] ?? process.env["CHEST_REPOSITORY"],
-    }
+//     const compose: RuntimeInfos["compose"] = {
+//       workding_dir: labels["com.docker.compose.project.working_dir"],
+//       config_files: labels["com.docker.compose.project.config_files"]?.split(/,/g)
+//     }
 
-    const compose: RuntimeInfos["compose"] = {
-      workding_dir: labels["com.docker.compose.project.working_dir"],
-      config_files: labels["com.docker.compose.project.config_files"]?.split(/,/g)
-    }
+//     const result: RuntimeInfos = {container, infos, labels, binds, chest, compose}
 
-    const result: RuntimeInfos = {container, infos, labels, binds, chest, compose}
+//     return result
+// }
 
-    return result
+
+export interface DoBackupOptions extends RunBorgOnContainerOptions {
+  archive: string
+  prefix: string
+  user: string
+  group: string
 }
 
+export async function do_backup(opts: DoBackupOptions) {
 
-export async function performBackup(cont: RuntimeInfos) {
-  const is_ssh = cont.chest.repository?.includes("@")
+  log_value(opts, "archive")
+  log_value(opts, "prefix")
 
+  // Do a warning if we're over SSH
+  const is_ssh = opts.repository?.includes("@")
   if (is_ssh) {
     console.error(ch.bold.redBright(` ⚠⚠⚠ warning : you are about to backup to a remote server. This is dangerous, you may be inadvertently trying to backup to an existing backup.\n`))
     const continue_ = await helpers.question("Continue ? y/n")
@@ -476,51 +381,45 @@ export async function performBackup(cont: RuntimeInfos) {
     }
   }
 
-  if (!is_ssh) {
-    helpers.ensure_valid_repository(cont.chest.repository!)
-  }
+  let prune = process.env.CHEST_PRUNE
+    ?? opts.infos.Config.Labels["borg.prune"]
+    ?? opts.infos.Config.Labels["chest.prune"]
+    ?? opts.config.prune
 
-  cont.chest.uid = process.getuid?.()
-  cont.chest.gid = process.getgid?.()
-
-  let prune = cont.chest.prune
   if (prune === 'auto') {
+    // Some usable defaults
     prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
-  } else if (prune && !prune.includes('-')) {// no real arguments to prune
+  } else if (prune && !prune.includes('-')) {
+    // no real arguments to prune
     prune = ''
   }
 
-  const is_tty = process.stderr.hasColors()
+  log_value({prune}, "prune")
 
-  // FIXME should prune on prefix only !
-  await runBorg(cont, `
-    #if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-      borg init --log-json -e ${cont.chest.passphrase ? "repokey-blake2" : "none"} ${is_ssh ? cont.chest.repository : "/repository"}
-    #fi
-    cd /data && borg create --progress --json --log-json --stats "::${cont.chest.archive}" ./*
-    ${prune ? `
-    # borg prune ${prune} --log-json -P "${cont.chest.prefix}" -s --list ::` : ''}
-  `, (out) => {
-
-    // console.log(out)
-    console.log(STAR, `duration ${ch.greenBright(Math.round(100 * out.archive.duration)/100)}s`)
-    console.log(STAR, `deduplicated size ${ch.greenBright(helpers.formatBytes(out.archive.stats.deduplicated_size))}, uncompressed ${ch.redBright(helpers.formatBytes(out.archive.stats.original_size))}`)
-    console.log(STAR, `repository size ${ch.greenBright(helpers.formatBytes(out.cache.stats.unique_csize))}`)
-    console.log(ch.greenBright("->"), ch.bold.magentaBright(out.archive.name))
-  }, !is_tty ? undefined : err => {
-    if (err.type === "progress_percent" || err.type === "progress_message") {
-      process.stderr.clearLine(0)
-      process.stderr.cursorTo(0)
-      if (!err.finished) {
-        process.stderr.write(err.message)
-      }
-    }
+  await run_borg_backup_on_container({
+    ...opts,
+    command: command_tag`
+#if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
+  borg init --log-json -e ${opts.passphrase ? "repokey-blake2" : "none"} ${is_ssh ? opts.repository : "/repository"}
+#fi
+cd /data && borg create --progress --json --log-json --stats "::${opts.archive}" ./*
+${prune ? `
+borg prune ${prune} --log-json -P "${opts.prefix}" -s --list ::` : ''}
+chown -R ${opts.user}:${opts.user} /repository
+`,
+    stdout(out, id) {
+      console.log(STAR, `duration ${ch.greenBright(Math.round(100 * out.archive.duration)/100)}s`)
+      console.log(STAR, `deduplicated size ${ch.greenBright(helpers.formatBytes(out.archive.stats.deduplicated_size))}, uncompressed ${ch.redBright(helpers.formatBytes(out.archive.stats.original_size))}`)
+      console.log(STAR, `repository size ${ch.greenBright(helpers.formatBytes(out.cache.stats.unique_csize))}`)
+      console.log(ch.greenBright("->"), ch.bold.magentaBright(out.archive.name))
+    },
+    stderr: helpers.stderr_progress,
   })
 }
 
 
 /** Stop a container "properly ?" */
-export async function stopContainer(container: Docker.Container) {
+export async function container_stop(container: Docker.Container) {
   do {
     // should I kill it at some point ?
     const infos = await container.inspect()
@@ -534,7 +433,7 @@ export async function stopContainer(container: Docker.Container) {
 }
 
 
-export async function startContainer(container: Docker.Container) {
+export async function container_start(container: Docker.Container) {
   const infos = await container.inspect()
   if (!infos.State.Running) {
     console.log(ch.greenBright(" ⏹︎ ") + " starting " + ch.greenBright(infos.Name))
@@ -547,11 +446,10 @@ const containers_to_stop_and_delete = new Set<string>()
 
 process.on("uncaughtException", async function (err) {
   for (let c of containers_to_restart) {
-    await startContainer(docker.getContainer(c))
+    await container_start(docker.getContainer(c))
   }
   for (let c of containers_to_stop_and_delete) {
-    await stopContainer(docker.getContainer(c))
+    await container_stop(docker.getContainer(c))
   }
   console.error(err)
-  cleanup?.()
 })

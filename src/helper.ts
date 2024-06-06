@@ -1,8 +1,9 @@
 import * as fs from "fs"
 import * as readline from "readline"
 import * as es from "event-stream"
-import { parser } from "stream-json"
+import parser from "stream-json"
 import StreamValues from "stream-json/streamers/StreamValues"
+import ch from "chalk"
 
 
 export function ensure_valid_repository(repo: string) {
@@ -36,7 +37,7 @@ export async function question(prompt: string): Promise<string> {
 }
 
 
-export async function jsonStream(out?: (data: any, key: number) => any) {
+export function jsonStream(out?: (data: any, key: number) => any) {
   const res = es.pipeline(
     parser({ jsonStreaming: true }),
     new StreamValues(),
@@ -46,9 +47,9 @@ export async function jsonStream(out?: (data: any, key: number) => any) {
     })
   )
 
-  res.on("error", err => {
-    console.error(err)
-  })
+  // res.on("error", err => {
+  //   console.error(err)
+  // })
 
   return res
 }
@@ -70,3 +71,38 @@ export function readEtcPasswd() {
     }))
   return passwd
 }
+
+const is_tty = process.stderr.hasColors()
+
+export const stderr_progress = !is_tty ? undefined : function stderr_progress(err: any, key: number) {
+  if (err.type === "progress_percent" && !err.finished) {
+    process.stderr.clearLine(0)
+    process.stderr.cursorTo(0)
+    process.stderr.write(`${ch.magentaBright(" -")} ${formatBytes(err.current)}/${formatBytes(err.total)}`)
+  } else if (err.type === "progress_percent" && err.finished) {
+    process.stderr.clearLine(0)
+    process.stderr.cursorTo(0)
+    // process.stderr.write("\n")
+  }
+}
+
+
+
+/**
+ * A simple timestamping function that returns string like '181101-030024'.
+ *
+ * We use this format because selecting it in a terminal won't choke, whereas
+ * using a regular date time format tends to not select text past the ':'
+ */
+export function getTimestamp() {
+  var d = new Date()
+  var pad = (n: number) => n < 10 ? '0' + n : n.toString()
+  return d.getFullYear().toString().slice(2, 4)
+    + pad(d.getMonth() + 1)
+    + pad(d.getDate())
+    + '-'
+    + pad(d.getHours())
+    + pad(d.getMinutes())
+    + pad(d.getSeconds())
+}
+

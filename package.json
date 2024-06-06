@@ -9,8 +9,8 @@
     "dps": "lib/dps.js"
   },
   "scripts": {
-    "build:chest": "esbuild --minify --bundle --outfile=lib/chest.js --platform=node src/chest.ts --external:ssh2 --external:cpu-features",
-    "build:dps": "esbuild --minify --bundle --outfile=lib/dps.js --platform=node src/dps.ts --external:ssh2 --external:cpu-features",
+    "build:chest": "esbuild --bundle --outfile=lib/chest.js --platform=node src/chest.ts --external:ssh2 --external:cpu-features",
+    "build:dps": "esbuild --bundle --outfile=lib/dps.js --platform=node src/dps.ts --external:ssh2 --external:cpu-features",
     "build": "mkdir -p lib ; npm run build:chest ; npm run build:dps ",
     "watch": "tsc -w | wtsc npm run build"
   },

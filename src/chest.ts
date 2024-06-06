@@ -1,43 +1,19 @@
 #!/usr/bin/env node
 import { version } from "../package.json"
-import { Type, command, flag, option, optional, run, subcommands } from "cmd-ts"
+import { Type, command, flag, option, optional, run, string, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
-import * as os from "os"
-import * as readline from "readline"
+import * as helpers from "./helper"
+
+import Dockerode from "dockerode"
 
 const ch = new _ch.Chalk()
-const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `${os.homedir()}/backups`
 const STAR = ch.greenBright(" *")
 
-function show(name: string, value: string) {
-  console.log(`${ch.bold.green(" *")} ${name}: ${ch.cyan(value)}`)
-}
 
-function formatBytes(bytes: number | null | undefined, decimals = 2) {
-  if (!bytes) return '0 Bytes'
-
-  const k = 1024
-  const dm = decimals < 0 ? 0 : decimals
-  const sizes = ['Bytes', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB', 'EiB', 'ZiB', 'YiB']
-
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
-}
-
-
-let _cont: api.RuntimeInfos = {
-  binds: [],
-  chest: {},
-  compose: {},
-}
-
-const ContainerOption: Type<string, api.RuntimeInfos> = {
+const ContainerOption: Type<string, Dockerode.Container> = {
   async from(input: string) {
-    const  result = await api.getContainerDescription(input)
-    _cont = result
-    return result
+    return api.docker.getContainer(input.replace(/^\//, "").replace(/\.docker$/, ""))
   }
 }
 
@@ -50,12 +26,16 @@ function map<R = string, T = R>(fn: (val: T) => R): Type<T, R> {
 }
 
 
+const config = api.read_config()
+
+
 const opt_container_required = option({
   description: "a container name",
   short: "c",
   long: "container",
   type: ContainerOption,
 })
+
 
 const opt_container_optional = option({
   description: "a container name",
@@ -71,84 +51,63 @@ const archive = option({
   description: "an archive name",
 })
 
+
 const opt_keep_running = flag({
   long: "keep-running",
   description: "do not stop the container from running",
   type: optional(map((opt: boolean) => {
-    _cont.chest.keep_running = opt
+    config.keep_running = opt
     return opt
   }))
 })
 
 
-function autoArchiveName(infos: api.RuntimeInfos) {
-  return (infos.chest.prefix || infos.infos?.Id || "chest") + "-" + api.getTimestamp()
-}
 
-
-const opt_archive = option({
+const opt_archive_optional = option({
   long: "archive",
   short: "a",
   description: "an archive name (use <chest list> to list them)",
-  type: map((res) => {
-    _cont.chest.archive = res
-    return res
-  }),
-  defaultValue() {
-    const res = autoArchiveName(_cont)
-    _cont.chest.archive = res
-    show("archive", res)
-    return res
-  },
+  type: optional(string),
 })
 
 
-function autoRepository(cont: api.RuntimeInfos) {
-  return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
-}
+// function autoRepository(cont: api.RuntimeInfos) {
+//   return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
+// }
 
 const opt_repository = option({
   long: "repository",
   short: "r",
   description: "a path to a repository if not inferring from labels",
-  type: map((res: string) => {
-    _cont.chest.repository = res
-    return res
-  }),
-  defaultValue: () => {
-    let res = autoRepository(_cont)
-
-    if (res == null) {
-      throw new Error("no repository found in container, please provide one")
-    }
-
-    show("repository", res)
-
-    _cont.chest.repository = res
-    return res
-  },
 })
 
+
+const opt_repository_optional = option({
+  long: "repository",
+  short: "r",
+  description: "a path to a repository if not inferring from labels",
+  type: optional(string),
+})
 
 ////////////////////////////////////////////////////
 
 
-const cmd_extract = command({
-  name: "extract",
-  description: "extract data from a backup",
-  version,
-  args: {
-    archive,
-    output_directory: option({
-      long: "output",
-      short: "o",
-      description: "the directory where to output the extract",
-    })
-  },
-  handler: args => {
+// const cmd_extract = command({
+//   name: "extract",
+//   description: "extract data from a backup",
+//   version,
+//   args: {
+//     archive,
+//     output_directory: option({
+//       long: "output",
+//       short: "o",
+//       description: "the directory where to output the extract",
+//     })
+//   },
+//   handler: args => {
 
-  },
-})
+//   },
+// })
 
 
 
@@ -157,13 +116,30 @@ const cmd_backup = command({
   version: version,
   description: "backup a container to a borg repository",
   args: {
-    opt_container: opt_container_required,
-    opt_archive,
-    opt_keep_running,
-    opt_repository,
+    container: opt_container_required,
+    archive: opt_archive_optional,
+    keep_running: opt_keep_running,
+    repository: opt_repository_optional,
   },
   handler: async args => {
-    await api.performBackup(_cont)
+
+    const defs = api.fill_defaults_from_container(await args.container.inspect(), config)
+
+    const repository = args.repository ?? defs.repository
+    const archive = args.archive ?? defs.archive
+
+    await api.do_backup({
+      binds: [],
+      config,
+      container: args.container,
+      infos: await args.container.inspect(),
+      repository,
+      archive,
+      keep_running: args.keep_running,
+      prefix: defs.prefix,
+      user: config.user,
+      group: config.user,
+    })
   }
 })
 
@@ -179,36 +155,24 @@ const cmd_backup_all = command({
     for (var cont of all) {
       if (cont.Labels['chest.auto-backup']) {
         console.log(ch.greenBright(" ***"), "backuping", ch.bold.yellowBright(cont.Names[0]))
-        const c = await api.getContainerDescription(cont.Id)
-        c.chest.archive = autoArchiveName(c)
-        c.chest.repository = autoRepository(c)
-        await api.performBackup(c)
+
+        const c = api.docker.getContainer(cont.Id)
+        const infos = await c.inspect()
+        const defs = api.fill_defaults_from_container(infos, config)
+        await api.do_backup({
+          container: c,
+          config,
+          infos,
+          repository: defs.repository,
+          archive: defs.archive,
+          prefix: defs.prefix,
+          user: config.user,
+          group: config.user,
+        })
       }
     }
   }
 })
-
-async function __restore(infos: api.RuntimeInfos, archive: string) {
-  if (infos.infos?.State.Running) {
-    console.error(ch.redBright("please shutdown the container and its whole stack before restoring to avoid inconsistencies and corrupted backups"))
-    return
-  }
-
-  await api.runBorg(infos, `cd /data && borg extract --progress --log-json --list -e '*.yml' -v "::${archive}"`,
-    out => {
-      console.log(out)
-    }, err => {
-      if (err.type === "progress_percent" && !err.finished) {
-        process.stderr.clearLine(0)
-        process.stderr.cursorTo(0)
-        process.stderr.write(`${ch.magentaBright(" -")} ${formatBytes(err.current)}/${formatBytes(err.total)}`)
-      } else if (err.finished) {
-        process.stderr.write("\n")
-      }
-      // console.log(err)
-    })
-
-}
 
 
 const cmd_restore = command({
@@ -216,8 +180,8 @@ const cmd_restore = command({
   description: "restore a container to a preceding backup",
   version: version,
   args: {
-    opt_container: opt_container_required,
-    opt_repository,
+    container: opt_container_required,
+    repository: opt_repository_optional,
     archive: option({
       description: "the archive name",
       short: "a",
@@ -226,7 +190,16 @@ const cmd_restore = command({
     })
   },
   handler: async args => {
-    await __restore(_cont, args.archive)
+    const infos = await args.container.inspect()
+    const defs = api.fill_defaults_from_container(infos, config)
+
+    await api.do_restore({
+      container: args.container,
+      infos: await args.container.inspect(),
+      archive: args.archive,
+      config,
+      repository: args.repository ?? defs.repository,
+    })
   }
 })
 
@@ -237,16 +210,30 @@ const cmd_list = command({
   description: "List archives in a repository or a container",
   args: {
     container: opt_container_optional,
-    repository: opt_repository,
+    repository: opt_repository_optional,
   },
   handler: async args => {
-    if (args.container) {
-      args.container.chest.keep_running = true
+    let repository = args.repository
+
+    if (args.container && !repository) {
+      const defs = api.fill_defaults_from_container(await args.container.inspect(), config)
+      repository = defs.repository
     }
-    await api.runBorg(_cont, `borg list --json --log-json --format="{archive}{NL}" ::`, out => {
-      for (const arch of out.archives) {
-        console.log(STAR, arch.name, ch.grey(arch.time))
-      }
+
+    if (!repository) {
+      console.error(`please give a container or a valid repository to list`)
+      return
+    }
+
+    await api.run_borg_backup({
+      repository: repository,
+      config,
+      command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
+      stdout(data, id) {
+        for (const arch of data.archives) {
+          console.log(STAR, arch.name, ch.grey(arch.time))
+        }
+      },
     })
   }
 })
@@ -266,18 +253,26 @@ const cmd_extract_compose = command({
     }),
   },
   handler: async args => {
-    if (args.container) {
-      args.container.chest.keep_running = true
-    }
-    _cont.binds.push(`${process.cwd()}:/cwd:rw`)
-    const uid = process.getuid!()
-    const gid = process.getgid!()
 
-    await api.runBorg(_cont, `mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v '--pattern=+*.yml' '--pattern=-**/*' "::${args.archive}" && chown ${uid}:${gid} /cwd2/* && cp -p /cwd2/* /cwd/`, out => {
-      for (const arch of out.archives) {
-        console.log(STAR, arch.name, ch.grey(arch.time))
-      }
+    let repository = args.repository
+
+    if (!repository && args.container) {
+      const infos = await args.container.inspect()
+      const defs = api.fill_defaults_from_container(infos, config)
+      repository = defs.repository
+    }
+
+    const binds = [
+      `${process.cwd()}:/cwd:rw`,
+    ]
+
+    await api.run_borg_backup({
+      command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v '--pattern=+*.yml' '--pattern=-**/*' "::${args.archive}" && chown ${config.user}:${config.user} /cwd2/* && cp -p /cwd2/* /cwd/`,
+      config,
+      repository,
+      binds,
     })
+
   }
 })
 
@@ -296,50 +291,48 @@ const cmd_restore_compose = command({
   },
   handler: async args => {
 
-    const wd = args.container.labels!["com.docker.compose.project.working_dir"]
-    args.container.chest.keep_running = true
+    const infos = await args.container.inspect()
+    const repository = args.repository
+    // const
 
-
-    const all = (await api.docker.listContainers({all: true}))
-      .filter(cont => cont.Labels["com.docker.compose.project.working_dir"] === wd)
-
-    const all_infos: api.RuntimeInfos[] = []
-    for (var cont of all) {
-      const info = await api.getContainerDescription(cont.Id)
-      all_infos.push(info)
-    }
+    const working_directory = infos.Config.Labels["com.docker.compose.project.working_dir"]
 
     // Start by finding all containers matching the same compose project
-
-
-    // for all of them, we're going to guess their prefix
+    const all = (await api.docker.listContainers({all: true}))
+      .filter(cont => cont.Labels["com.docker.compose.project.working_dir"] === working_directory)
 
     // All found archives.
     const archives: {name: string, time: string}[] = []
 
-    _cont.container = undefined
-    _cont.chest.repository = args.repository
-
-
-    console.log(STAR, "listing archives from remote")
-    // List
-    await api.runBorg(_cont, `borg list --json --log-json --format="{archive}{NL}" ::`, out => {
-      for (const arch of out.archives) {
-        archives.push({name: arch.name, time: arch.time})
-        console.log(STAR, arch.name, ch.grey(arch.time))
-      }
+    console.log(STAR, "listing archives from repository")
+    await api.run_borg_backup({
+      command: `borg list --json --log-json --format="{archive}{NL}" ::`,
+      repository,
+      config,
+      stdout(out, id) {
+        for (const arch of out.archives) {
+          archives.push({name: arch.name, time: arch.time})
+          console.log(STAR, arch.name, ch.grey(arch.time))
+        }
+      },
     })
 
+    // Sort the archives so that the most recent ones come first
     archives.sort((a, b) => -a.time.localeCompare(b.time))
 
-    const todo: {cont: api.RuntimeInfos, archive: string}[] = []
+    const todo: {container: Dockerode.Container, infos: Dockerode.ContainerInspectInfo, archive: string}[] = []
 
-    for (let inf of all_infos) {
-      const pref = inf.chest.prefix
+    for (let inf of all) {
+      const container = await api.docker.getContainer(inf.Id)
+      const infos = await container.inspect()
+
+      const defs = api.fill_defaults_from_container(infos, config)
+      const pref = defs.prefix
       const my_archive = archives.filter(ar => ar.name.startsWith(pref + "-"))[0]
       if (my_archive) {
         todo.push({
-          cont: inf,
+          container,
+          infos,
           archive: my_archive.name
         })
       }
@@ -347,16 +340,14 @@ const cmd_restore_compose = command({
 
     if (todo.length === 0) {
       console.log(ch.redBright("there is nothing to restore, exiting."))
+      return
     }
 
-    const rd = readline.createInterface({input: process.stdin, output: process.stdout})
     console.log(ch.yellowBright(" !! ") + "the following will happen :")
     for (let td of todo) {
-      console.log(`${ch.yellowBright(" - ")} restore ${td.archive} into ${td.cont.infos?.Name}`)
+      console.log(`${ch.yellowBright(" - ")} restore ${td.archive} into ${td.infos.Name}`)
     }
-
-    const ans = await new Promise<string>(cal => rd.question("continue ? y/n ", cal))
-    rd.close()
+    const ans = await helpers.question("continue ? y/[n] ")
 
     if (ans.toLowerCase() !== "y") {
       console.log("exiting")
@@ -364,8 +355,13 @@ const cmd_restore_compose = command({
     }
 
     for (let td of todo) {
-      td.cont.chest.repository = args.repository
-      await __restore(td.cont, td.archive)
+      await api.do_restore({
+        container: td.container,
+        infos: td.infos,
+        archive: td.archive,
+        repository,
+        config,
+      })
     }
   }
 })
