@@ -3,12 +3,11 @@ import { version } from "../package.json"
 import { Type, command, flag, option, optional, run, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
-// import * as os from "os"
-import * as fs from "fs"
+import * as os from "os"
 import * as readline from "readline"
 
 const ch = new _ch.Chalk()
-const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `/home/chest/backups`
+const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `${os.homedir()}/backups`
 const STAR = ch.greenBright(" *")
 
 function show(name: string, value: string) {
@@ -27,12 +26,6 @@ function formatBytes(bytes: number | null | undefined, decimals = 2) {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
 }
 
-
-function ensure_valid_repository(repo: string) {
-  if (!fs.statSync(repo, { throwIfNoEntry: false })?.isDirectory()) {
-    fs.mkdirSync(repo, { recursive: true })
-  }
-}
 
 let _cont: api.RuntimeInfos = {
   binds: [],
@@ -158,65 +151,6 @@ const cmd_extract = command({
 })
 
 
-async function __backup(cont: api.RuntimeInfos) {
-  const is_ssh = cont.chest.repository?.includes("@")
-
-  if (is_ssh) {
-    console.error(ch.bold.redBright(` ⚠⚠⚠ warning : you are about to backup to a remote server. This is dangerous, you may be inadvertently trying to backup to an existing backup.\n`))
-    const int = readline.createInterface({input: process.stdin, output: process.stderr})
-    const res = await new Promise<string>(acc => {
-      int.question("Continue ? y/n ", ans => {
-        acc(ans)
-      })
-    })
-    if (res.toLowerCase() !== "y") {
-      console.error("aborting.")
-      return
-    }
-    int.close()
-  }
-
-  if (!is_ssh)
-    ensure_valid_repository(cont.chest.repository!)
-
-  cont.chest.uid = process.getuid?.()
-  cont.chest.gid = process.getgid?.()
-
-  let prune = cont.chest.prune
-  if (prune === 'auto') {
-    prune = '--keep-daily 7 --keep-weekly 2 --keep-monthly 1'
-  } else if (prune && !prune.includes('-')) {// no real arguments to prune
-    prune = ''
-  }
-
-  const is_tty = process.stderr.hasColors()
-
-  // FIXME should prune on prefix only !
-  await api.runBorg(cont, `
-    #if grep repository /repository/config > /dev/null 2>&1 ; [ "$?" -ne 0 ]; then
-      borg init --log-json -e ${cont.chest.passphrase ? "repokey-blake2" : "none"} ${is_ssh ? cont.chest.repository : "/repository"}
-    #fi
-    cd /data && borg create --progress --json --log-json --stats "::${cont.chest.archive}" ./*
-    ${prune ? `
-    # borg prune ${prune} --log-json -P "${cont.chest.prefix}" -s --list ::` : ''}
-  `, (out) => {
-
-    // console.log(out)
-    console.log(STAR, `duration ${ch.greenBright(Math.round(100 * out.archive.duration)/100)}s`)
-    console.log(STAR, `deduplicated size ${ch.greenBright(formatBytes(out.archive.stats.deduplicated_size))}, uncompressed ${ch.redBright(formatBytes(out.archive.stats.original_size))}`)
-    console.log(STAR, `repository size ${ch.greenBright(formatBytes(out.cache.stats.unique_csize))}`)
-    console.log(ch.greenBright("->"), ch.bold.magentaBright(out.archive.name))
-  }, !is_tty ? undefined : err => {
-    if (err.type === "progress_percent" || err.type === "progress_message") {
-      process.stderr.clearLine(0)
-      process.stderr.cursorTo(0)
-      if (!err.finished) {
-        process.stderr.write(err.message)
-      }
-    }
-  })
-}
-
 
 const cmd_backup = command({
   name: "backup",
@@ -229,7 +163,7 @@ const cmd_backup = command({
     opt_repository,
   },
   handler: async args => {
-    await __backup(_cont)
+    await api.performBackup(_cont)
   }
 })
 
@@ -248,7 +182,7 @@ const cmd_backup_all = command({
         const c = await api.getContainerDescription(cont.Id)
         c.chest.archive = autoArchiveName(c)
         c.chest.repository = autoRepository(c)
-        await __backup(c)
+        await api.performBackup(c)
       }
     }
   }
@@ -450,6 +384,5 @@ const opts = subcommands({
     // extract: cmd_extract
   },
 })
-
 
 run(opts, process.argv.slice(2))

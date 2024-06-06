@@ -12,6 +12,11 @@
   resolved "https://registry.yarnpkg.com/@esbuild/linux-loong64/-/linux-loong64-0.15.18.tgz#128b76ecb9be48b60cf5cfc1c63a4f00691a3239"
   integrity sha512-L4jVKS82XVhw2nvzLg/19ClLWg0y27ulRwuP7lcyL6AbUWB5aPglXY3M21mauDQMDfRLs8cQmeT03r/+X3cZYQ==
 
+"@salesway/scotty@^0.1.1":
+  version "0.1.1"
+  resolved "https://registry.yarnpkg.com/@salesway/scotty/-/scotty-0.1.1.tgz#42290b058b0a982854b9b3d3f82c248f1251f839"
+  integrity sha512-FOpnGUw2ku+Mz2EveSBITAue+aViTuWbELCHlr+GVIbcRFeqHQCC+gUPN1IXHmR+Z75WHLKjVVyqOPIT8YX14A==
+
 "@types/colors@^1.2.1":
   version "1.2.1"
   resolved "https://registry.yarnpkg.com/@types/colors/-/colors-1.2.1.tgz#57703f1a9f7f5fc40afb81eef13e96acdd1016a6"
@@ -524,6 +529,11 @@ safe-buffer@~5.1.0, safe-buffer@~5.1.1:
   version "5.1.2"
   resolved "https://registry.yarnpkg.com/safe-buffer/-/safe-buffer-5.1.2.tgz#991ec69d296e0313747d59bdfd2b745c35f8828d"
   integrity sha512-Gd2UZBJDkXlY7GbJxfsE8/nvKkUEU1G38c1siN6QP6a9PT9MmHB8GnpscSmMJSoF8LOIrt8ud/wPtojys4G6+g==
+
+smol-toml@^1.2.1:
+  version "1.2.1"
+  resolved "https://registry.yarnpkg.com/smol-toml/-/smol-toml-1.2.1.tgz#6216334548763d4aac76cafff19f8914937ee13a"
+  integrity sha512-OtZKrVrGIT+m++lxyF0z5n68nkwdgZotPhy89bfA4T7nSWe0xeQtfbjM1z5VLTilJdWXH46g8i0oAcpQNkzZTg==
 
 split-ca@^1.0.0:
   version "1.0.1"
