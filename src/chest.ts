@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { version } from "../package.json"
-import { Type, command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
+import { Type, command, flag, option, optional, run, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
 import * as os from "os"

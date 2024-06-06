@@ -154,7 +154,7 @@ export async function runBorg(
       console.log(` ${ch.redBright("⏸︎")} stopping ${infos.Name}`)
       await try_stop(cont.container)
       // Let's give ourselves some time.
-      await new Promise(ac => setTimeout(ac, 5000))
+      await new Promise(ac => setTimeout(ac, 1000))
     }
 
     cleanup = async () => {
