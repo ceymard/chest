@@ -3,12 +3,12 @@ import { version } from "../package.json"
 import { Type, command, flag, option, optional, run, subcommands } from "cmd-ts"
 import * as api from "./api"
 import * as _ch from "chalk"
-import * as os from "os"
+// import * as os from "os"
 import * as fs from "fs"
 import * as readline from "readline"
 
 const ch = new _ch.Chalk()
-const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `${os.homedir()}/backups`
+const BACKUPS_DIR = process.env["CHEST_BACKUPS_DIR"] ?? `/home/chest/backups`
 const STAR = ch.greenBright(" *")
 
 function show(name: string, value: string) {
