@@ -138,7 +138,7 @@ const cmd_backup = command({
       keep_running: args.keep_running,
       prefix: defs.prefix,
       user: config.user,
-      group: config.user,
+      group: config.group,
     })
   }
 })
@@ -167,7 +167,7 @@ const cmd_backup_all = command({
           archive: defs.archive,
           prefix: defs.prefix,
           user: config.user,
-          group: config.user,
+          group: config.group,
         })
       }
     }
@@ -267,7 +267,7 @@ const cmd_extract_compose = command({
     ]
 
     await api.run_borg_backup({
-      command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v '--pattern=+*.yml' '--pattern=-**/*' "::${args.archive}" && chown ${config.user}:${config.user} /cwd2/* && cp -p /cwd2/* /cwd/`,
+      command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v '--pattern=+*.yml' '--pattern=-**/*' "::${args.archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -p /cwd2/* /cwd/`,
       config,
       repository,
       binds,
@@ -287,15 +287,17 @@ const cmd_restore_compose = command({
       short: "r",
       description: "a repository"
     }),
-    container: opt_container_required,
+    container: opt_container_optional,
   },
   handler: async args => {
 
-    const infos = await args.container.inspect()
     const repository = args.repository
-    // const
+    let working_directory = process.cwd()
 
-    const working_directory = infos.Config.Labels["com.docker.compose.project.working_dir"]
+    if (args.container) {
+      const infos = await args.container.inspect()
+      working_directory = infos.Config.Labels["com.docker.compose.project.working_dir"]
+    }
 
     // Start by finding all containers matching the same compose project
     const all = (await api.docker.listContainers({all: true}))

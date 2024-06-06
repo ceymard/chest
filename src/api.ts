@@ -1,4 +1,4 @@
-import Docker, { Container, ContainerInspectInfo } from "dockerode"
+import Docker, { ContainerInspectInfo } from "dockerode"
 import path from "path"
 import ch from "chalk"
 import * as os from "os"
@@ -33,6 +33,8 @@ export function command_tag(tpl: TemplateStringsArray, ...values: string[]) {
 export class ChestConfig {
 
   @s.str user = current_user.username
+  @s.str group = ""+current_user.gid
+
   @s.str backups_root_dir: string = path.join(current_user.homedir, "backups")
   @s.str passphrase?: string
   @s.str prune = "--keep-daily 7 --keep-weekly 2 --keep-monthly 1"
