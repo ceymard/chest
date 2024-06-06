@@ -1,6 +1,6 @@
 import Docker, { Container, ContainerInspectInfo } from "dockerode"
 import path from "path"
-import * as _ch from "chalk"
+import ch from "chalk"
 import * as es from "event-stream"
 import * as os from "os"
 import * as fs from "fs"
@@ -10,8 +10,6 @@ import StreamValues from "stream-json/streamers/StreamValues"
 import Dockerode from "dockerode"
 import * as toml from "smol-toml"
 import * as s from "@salesway/scotty"
-
-const ch = new _ch.Chalk()
 
 export const docker = new Docker()
 const BORG_IMAGE = 'ceymard/borg:1.2.8'

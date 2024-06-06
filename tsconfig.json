@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "commonjs",
+    "module": "CommonJS",
     "moduleResolution": "node",
     "declaration": true,
     "sourceMap": true,
@@ -10,10 +10,11 @@
     "noUnusedLocals": true,
     "noEmit": true,
     "rootDir": "./src",
+    "outDir": "./lib",
     "experimentalDecorators": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "lib": ["es6"]
+    "lib": ["es6", "ESNext"]
   },
-  "exclude": ["__dist__", "__build__"]
+  "exclude": ["__dist__", "__build__", "lib"]
 }
