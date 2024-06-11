@@ -186,7 +186,6 @@ export interface Command {
 export async function run_borg_backup(args: RunBorgOptions & Command) {
 
   log_value(args, "repository")
-  log_value(args, "binds")
 
   // We're not going to do to the same thing
   const repo_is_ssh = args.repository?.includes("@")
@@ -210,7 +209,7 @@ export async function run_borg_backup(args: RunBorgOptions & Command) {
   }
 
   // A series of default binds
-  const binds = (args.binds??[]).slice()
+  const binds = args.binds??[]
   binds.push(
     "/etc/hosts:/etc/hosts:ro",
     "/etc/localtime:/etc/localtime:ro",
@@ -241,6 +240,9 @@ export async function run_borg_backup(args: RunBorgOptions & Command) {
     // If not ssh, just bind the repository
     binds.push(`${args.repository}:/repository:rw`)
   }
+
+  log_value(args, "binds")
+
 
   const borg = await docker.createContainer({
     Image: args.config.borg_image,

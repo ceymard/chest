@@ -320,6 +320,7 @@ const cmd_compose_extract = command({
   args: {
     repository_definition: P("repository", "a repository path, or a container with labels, or a project name"),
     archive: P("archive", "the archive name containing the wanted compose files"),
+    passphrase: Opt("passphrase", "a passphrase")
   },
   handler: async args => {
 
@@ -334,6 +335,7 @@ const cmd_compose_extract = command({
       command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v --pattern=+__compose__ '--pattern=-**/*' "::${archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -Rfp /cwd2/__compose__/* /cwd/ 2>/dev/null`,
       config,
       repository,
+      passphrase: args.passphrase,
       binds,
     })
 
