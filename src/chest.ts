@@ -6,6 +6,7 @@ import * as _ch from "chalk"
 import * as helpers from "./helper"
 
 import Dockerode from "dockerode"
+import path from "path"
 
 const ch = new _ch.Chalk()
 const STAR = ch.greenBright(" *")
@@ -23,6 +24,15 @@ function map<R = string, T = R>(fn: (val: T) => R): Type<T, R> {
       return fn(input)
     }
   }
+}
+
+
+function O(long: string, description?: string) {
+  return option({long, short: long[0], description})
+}
+
+function Opt(long: string, description?: string) {
+  return option({long, short: long[0], description, type: optional(string)})
 }
 
 
@@ -63,18 +73,6 @@ const opt_keep_running = flag({
 
 
 
-const opt_archive_optional = option({
-  long: "archive",
-  short: "a",
-  description: "an archive name (use <chest list> to list them)",
-  type: optional(string),
-})
-
-
-// function autoRepository(cont: api.RuntimeInfos) {
-//   return cont.chest.repository ?? `${BACKUPS_DIR}/${cont.chest.name}`
-// }
-
 const opt_repository = option({
   long: "repository",
   short: "r",
@@ -92,32 +90,13 @@ const opt_repository_optional = option({
 ////////////////////////////////////////////////////
 
 
-// const cmd_extract = command({
-//   name: "extract",
-//   description: "extract data from a backup",
-//   version,
-//   args: {
-//     archive,
-//     output_directory: option({
-//       long: "output",
-//       short: "o",
-//       description: "the directory where to output the extract",
-//     })
-//   },
-//   handler: args => {
-
-//   },
-// })
-
-
-
 const cmd_backup = command({
   name: "backup",
   version: version,
   description: "backup a container to a borg repository",
   args: {
     container: opt_container_required,
-    archive: opt_archive_optional,
+    archive: Opt("archive"),
     keep_running: opt_keep_running,
     repository: opt_repository_optional,
   },
@@ -127,6 +106,7 @@ const cmd_backup = command({
 
     const repository = args.repository ?? defs.repository
     const archive = args.archive ?? defs.archive
+    const prune = defs.prune
 
     await api.do_backup({
       binds: [],
@@ -135,8 +115,50 @@ const cmd_backup = command({
       infos: await args.container.inspect(),
       repository,
       archive,
+      prune,
       keep_running: args.keep_running,
       prefix: defs.prefix,
+      user: config.user,
+      group: config.group,
+    })
+  }
+})
+
+
+const cmd_backup_compose = command({
+  name: "compose-backup",
+  version,
+  description: "backup a compose project",
+  args: {
+    project_name: O("project-name", "the compose project name"),
+    archive: Opt("archive", "an archive name"),
+    repository: Opt("repository", "a repository"),
+    passphrase: Opt("passphrase", "a passphrase")
+  },
+  handler: async args => {
+
+    const project_name = args.project_name
+    const containers = await api.docker.listContainers({
+      filters: {
+        label: [
+        `com.docker.compose.project=${args.project_name}`
+        ]
+      }
+    })
+
+    const defs = api.fill_defaults_from_container(containers , config)
+    const repository = args.repository ?? path.join(defs.backups_compose_dir, project_name)
+    const archive = args.archive ?? helpers.getTimestamp2()
+    const prune = defs.prune
+
+    await api.do_project_backup({
+      project_name,
+      containers,
+      archive,
+      prune,
+      config,
+      repository,
+      passphrase: args.passphrase,
       user: config.user,
       group: config.group,
     })
@@ -159,10 +181,14 @@ const cmd_backup_all = command({
         const c = api.docker.getContainer(cont.Id)
         const infos = await c.inspect()
         const defs = api.fill_defaults_from_container(infos, config)
+
+        const prune = defs.prune
+
         await api.do_backup({
           container: c,
           config,
           infos,
+          prune,
           repository: defs.repository,
           archive: defs.archive,
           prefix: defs.prefix,
@@ -277,6 +303,41 @@ const cmd_extract_compose = command({
 })
 
 
+const cmd_restore_tar = command({
+  name: "restore-tar",
+  version,
+  description: "restore a compose project from a tar archive",
+  args: {
+    project: O("project"),
+    output: O("output"),
+  },
+  handler: async args => {
+
+  }
+})
+
+
+
+const cmd_export_tar = command({
+  name: "export-tar",
+  version,
+  description: "export a borg archive to a tarball",
+  args: {
+    respository: O("repository"),
+    archive: O("archive"),
+    output: O("output"),
+  },
+  handler: async args => {
+    api.do_export_tar({
+      archive: args.archive,
+      config,
+      repository: args.respository,
+      tarpath: args.output,
+    })
+  },
+})
+
+
 const cmd_restore_compose = command({
   name: "ressucitate",
   version,
@@ -375,10 +436,13 @@ const opts = subcommands({
   cmds: {
     backup: cmd_backup,
     "backup-all": cmd_backup_all,
-    "extract-compose": cmd_extract_compose,
+    "compose-extract": cmd_extract_compose,
+    "compose-backup": cmd_backup_compose,
     restore: cmd_restore,
     list: cmd_list,
     "restore-compose": cmd_restore_compose,
+    "tar-export": cmd_export_tar,
+    "tar-restore": cmd_restore_tar,
     // extract: cmd_extract
   },
 })

@@ -4,6 +4,30 @@ import * as es from "event-stream"
 import parser from "stream-json"
 import StreamValues from "stream-json/streamers/StreamValues"
 import ch from "chalk"
+// import { Transform } from "stream"
+
+
+
+// const LBRACE = "{".charCodeAt(0)
+// const RBRACE = "}".charCodeAt(0)
+// const COLON = ":".charCodeAt(0)
+// const QUOTE = "\"".charCodeAt(0)
+// const SQUOTE = "\'".charCodeAt(0)
+// const SLASH = "/".charCodeAt(0)
+
+
+// export function jsonParser() {
+//   let buffer = null
+
+//   return new Transform({
+//     transform(chunk: Buffer | string, encoding, callback) {
+//       for (let i = 0, l = chunk.length; i < l; i++) {
+//         const ch = chunk.at(i)
+//       }
+//       callback()
+//     },
+//   })
+// }
 
 
 export function ensure_valid_repository(repo: string) {
@@ -106,3 +130,20 @@ export function getTimestamp() {
     + pad(d.getSeconds())
 }
 
+
+export function getTimestamp2() {
+  const d = new Date()
+  var pad = (n: number) => n < 10 ? '0' + n : n.toString()
+  return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())}-${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}.${d.getMilliseconds()}`
+}
+
+
+export function touch(path: string) {
+  const time = new Date()
+  try {
+    fs.utimesSync(path, time, time);
+  } catch (e) {
+      let fd = fs.openSync(path, 'a');
+      fs.closeSync(fd);
+  }
+}
