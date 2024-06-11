@@ -115,8 +115,8 @@ export function fill_defaults_from_container(infos: ContainerInspectInfo | Conta
     ?? config.passphrase
 
   let prune = process.env.CHEST_PRUNE
-    ?? labels["borg.prune"]
-    ?? labels["chest.prune"]
+    // ?? labels["borg.prune"]
+    // ?? labels["chest.prune"]
     ?? config.prune
 
   if (prune === 'auto') {
@@ -699,9 +699,8 @@ export async function container_start(container: Docker.Container) {
 const containers_to_restart = new Set<string>()
 const containers_to_stop_and_delete = new Set<string>()
 
-process.on("uncaughtException", async function (err) {
-  console.error(ch.redBright("entering error mode"))
-  console.error(err)
+async function terminate() {
+  // console.error(ch.redBright("entering error mode"))
   for (let c of containers_to_restart) {
     try {
       console.error(`trying to restart ${c}`)
@@ -714,4 +713,19 @@ process.on("uncaughtException", async function (err) {
       await container_stop(docker.getContainer(c))
     } finally { containers_to_stop_and_delete.delete(c) }
   }
+}
+
+process.on("beforeExit", () => {
+  terminate()
 })
+
+for (const sig of ['SIGHUP', 'SIGINT', 'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT',
+'SIGBUS', 'SIGFPE', 'SIGUSR1', 'SIGSEGV', 'SIGUSR2', 'SIGTERM'
+]) {
+  process.on(sig, function (code) {
+      terminate().then(() => {
+        process.exit(code)
+      })
+      console.log('signal: ' + sig)
+  })
+}

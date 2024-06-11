@@ -221,7 +221,7 @@ const cmd_compose_backup_all = command({
       const labels = api.merge_labels(containers)
 
       if (!labels["chest.auto-backup"]) { continue }
-      console.log(`${STAR} backuping ${ch.bold.bgCyanBright(project_name)}`)
+      console.log(`${STAR} backuping ${ch.bold.bgCyanBright.redBright(project_name)}`)
 
       const defs = api.fill_defaults_from_container(containers , config)
       const repository = defs.repository ?? path.join(defs.backups_compose_dir, project_name)
@@ -239,6 +239,7 @@ const cmd_compose_backup_all = command({
         passphrase,
         user: config.user,
         group: config.group,
+        stderr: helpers.stderr_progress,
       })
     }
 
