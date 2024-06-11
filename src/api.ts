@@ -438,7 +438,7 @@ export interface RunBorgOnProjectOptions extends RunBorgOptions {
 
 type FigureOutItem = {
   info: ContainerInspectInfo,
-  provides: string,
+  provides: Set<string>,
   needs: Set<string>,
   running: boolean
 }
@@ -449,11 +449,20 @@ function figure_out_container_deps(containers: ContainerInspectInfo[]) {
   let items = [] as FigureOutItem[]
 
   for (let c of containers) {
-    const provides = c.Config.Labels["com.docker.compose.service"]
+    const provides = new Set([c.Name, c.Config.Labels["com.docker.compose.service"]])
 
     const depends_on = c.Config.Labels["com.docker.compose.depends_on"] ?? ""
     const needs = new Set(depends_on.trim().length === 0 ? []
       : depends_on.split(/,/g).map(dep => dep.split(":")[0]))
+
+    const links = c.HostConfig.Links as string[]
+    if (links) {
+      for (let link of links) {
+        const contneed = link.split(":")[0]
+        needs.add(contneed)
+      }
+    }
+    // for (c.HostConfig.Links)
 
     items.push({
       info: c,
@@ -463,7 +472,13 @@ function figure_out_container_deps(containers: ContainerInspectInfo[]) {
     })
   }
 
-  const mp = new Map(items.map(i => [i.provides, i]))
+  const mp = new Map<string, FigureOutItem>()
+  for (let it of items) {
+    for (let prov of it.provides) {
+      mp.set(prov, it)
+    }
+  }
+
   function _need(i: FigureOutItem, needs: string) {
     i.needs.add(needs)
     const c = mp.get(needs)
@@ -480,7 +495,7 @@ function figure_out_container_deps(containers: ContainerInspectInfo[]) {
   }
 
   items = items.sort((a, b) => {
-    return a.needs.has(b.provides) ? 1 : b.needs.has(a.provides) ? -1 : 0
+    return [...b.provides].some(prov => a.needs.has(prov)) ? 1 : [...a.provides].some(prov => b.needs.has(prov)) ? -1 : 0
   })
 
   return items
@@ -541,7 +556,7 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
   if (!args.keep_running) {
     // Stop the stack
     await Promise.all(deps_to_stop.map(dep => {
-      console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright(dep.provides))
+      console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright([...dep.provides]))
       containers_to_restart.add(dep.info.Id)
       return new Container(docker.modem, dep.info.Id).stop()
     }))
@@ -568,11 +583,15 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
       proms = []
     }
 
-    console.log(ch.greenBright(" ▶ ") + "restarting " + ch.greenBright(c.provides))
+    console.log(ch.greenBright(" ▶ ") + "restarting " + ch.greenBright([...c.provides]))
     // Launch the container, and mark it as active when it is done
     proms.push(cont.start().then(_ => {
-      active.add(c.provides)
+      for (let prov of c.provides) {
+        active.add(prov)
+      }
       containers_to_restart.delete(c.info.Id)
+      // give 1s, just in case...
+      return new Promise(acc => setTimeout(acc, 1000))
     }))
   }
 
