@@ -267,29 +267,32 @@ const cmd_restore = command({
 })
 
 
+async function find_out_repository(def: string) {
+  const test_project = await get_compose(def, {})
+  let repository = def
+
+  if (test_project.containers.length) {
+    return test_project.repository
+  }
+
+  const cnt = api.docker.getContainer(def)
+
+  return repository
+}
+
+
 const cmd_list = command({
   name: "list",
   // version,
   description: "List archives in a repository or a container",
   args: {
-    container: opt_container_optional,
-    repository: opt_repository_optional,
+    repository: P("repository", "a repo description"),
   },
   handler: async args => {
-    let repository = args.repository
-
-    if (args.container && !repository) {
-      const defs = api.fill_defaults_from_container(await args.container.inspect(), config)
-      repository = defs.repository
-    }
-
-    if (!repository) {
-      console.error(`please give a container or a valid repository to list`)
-      return
-    }
+    let repository = await find_out_repository(args.repository)
 
     await api.run_borg_backup({
-      repository: repository,
+      repository,
       config,
       command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
       stdout(data, id) {
