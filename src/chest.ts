@@ -424,6 +424,7 @@ const cmd_compose_restore = command({
     project_name: P("project-name", "a compose project name"),
     repository: opt_repository_optional,
     archive: P("archive", "the archive name to restore to"),
+    passphrase: Opt("passphrase", "a passphrase"),
   },
   handler: async args => {
 
