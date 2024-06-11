@@ -496,6 +496,10 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
     `com.docker.compose.project=${args.project_name}`
   ] })
 
+  if (!args.project_name || !containers?.length) {
+    throw new Error("project not found")
+  }
+
   const infos = await Promise.all(containers.map(c => new Container(docker.modem, c.Id).inspect()))
 
   let working_dir: string | null = null
