@@ -558,7 +558,7 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
 
   if (!args.keep_running) {
     // Stop the stack
-    await Promise.all(deps_to_stop.reverse().map(dep => {
+    await Promise.all(deps_to_stop.slice().reverse().map(dep => {
       console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright([...dep.provides]))
       containers_to_restart.add(dep.info.Id)
       return new Container(docker.modem, dep.info.Id).stop()
