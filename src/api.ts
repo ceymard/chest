@@ -580,6 +580,7 @@ export async function do_project_backup(opts: DoProjectBackup) {
   const is_ssh = opts.repository.includes("@")
   const prune = opts.prune
   log_value(opts, "prune")
+  log_value(opts, "archive")
 
   await run_borg_backup_on_project({
     ...opts,

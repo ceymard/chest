@@ -316,32 +316,29 @@ const cmd_list = command({
 const cmd_compose_extract = command({
   name: "extract-compose",
   version,
-  description: "extract compose files from a backup",
+  description: "extract docker-compose working directory from a backup",
   args: {
-    repository: opt_repository,
-    container: opt_container_optional,
-    archive: option({
-      long: "archive",
-      short: "a",
-      description: "the archive to get the docker-compose.yml from",
-    }),
+    repository_definition: P("repository", "a repository path, or a container with labels, or a project name"),
+    archive: P("archive", "the archive name containing the wanted compose files"),
   },
   handler: async args => {
 
-    let repository = args.repository
+    const def = args.repository_definition
+    const test_project = await get_compose(def, {})
+    let repository = def
 
-    if (!repository && args.container) {
-      const infos = await args.container.inspect()
-      const defs = api.fill_defaults_from_container(infos, config)
-      repository = defs.repository
+    if (test_project.containers.length) {
+      repository = test_project.repository
     }
+
+    const archive = args.archive
 
     const binds = [
       `${process.cwd()}:/cwd:rw`,
     ]
 
     await api.run_borg_backup({
-      command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v '--pattern=+*.yml' '--pattern=-**/*' "::${args.archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -p /cwd2/* /cwd/`,
+      command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v --pattern=+__compose__ '--pattern=-**/*' "::${archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -Rfp /cwd2/__compose__/* /cwd/ 2>/dev/null`,
       config,
       repository,
       binds,
