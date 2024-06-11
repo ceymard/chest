@@ -1,9 +1,11 @@
-import Docker, { Container, ContainerInfo, ContainerInspectInfo } from "dockerode"
+import Docker, { ContainerInfo, ContainerInspectInfo } from "dockerode"
+const { Container } = Docker
 import path from "path"
+
 import ch from "chalk"
 import * as os from "os"
 import * as fs from "fs"
-import * as helpers from "./helper"
+import * as helpers from "./helper.js"
 import Dockerode from "dockerode"
 import * as toml from "smol-toml"
 import * as s from "@salesway/scotty"
@@ -84,7 +86,7 @@ export function get_archive_name(infos: RunBorgOnContainerOptions) {
 }
 
 
-function mergeLabels(containers: ContainerInfo[]): { [label: string]: string; } {
+export function merge_labels(containers: ContainerInfo[]): { [label: string]: string; } {
   const res = {}
   for (let c of containers) {
     Object.assign(res, c.Labels)
@@ -96,7 +98,7 @@ function mergeLabels(containers: ContainerInfo[]): { [label: string]: string; } 
 /** If not provided by the command, fill default optoins */
 export function fill_defaults_from_container(infos: ContainerInspectInfo | ContainerInfo[], config: ChestConfig) {
 
-  const labels = Array.isArray(infos) ? mergeLabels(infos) : infos.Config.Labels
+  const labels = Array.isArray(infos) ? merge_labels(infos) : infos.Config.Labels
 
   const backups_root_dir = process.env.CHEST_BACKUPS_DIR
     ?? labels["chest.backups_root_dir"]
@@ -287,6 +289,7 @@ export async function run_borg_backup(args: RunBorgOptions & Command) {
 
   } finally {
     await container_stop(borg)
+    containers_to_stop_and_delete.delete(borg.id)
     await borg.remove({  })
   }
 
@@ -442,7 +445,7 @@ function figure_out_container_deps(containers: ContainerInspectInfo[]) {
   for (let c of containers) {
     const provides = c.Config.Labels["com.docker.compose.service"]
 
-    const depends_on = c.Config.Labels["com.docker.compose.depends_on"]
+    const depends_on = c.Config.Labels["com.docker.compose.depends_on"] ?? ""
     const needs = new Set(depends_on.trim().length === 0 ? []
       : depends_on.split(/,/g).map(dep => dep.split(":")[0]))
 
@@ -533,17 +536,19 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
   }))
 
   // Run borg-backup
-  console.log(STAR, "backuping")
+  console.log(STAR, "running borg")
   await run_borg_backup(args)
 
   // Relaunch the stack
   let proms: Promise<any>[] = []
   const active = new Set<string>()
+  console.log(STAR, "relaunching containers")
   for (let c of deps_to_stop) {
     const cont = new Container(docker.modem, c.info.Id)
 
     // If it needs containers, wait for them to be relaunched
     if (c.needs.size && [...c.needs].filter(n => !active.has(n))) {
+      console.log("awaiting 2 ?")
       await Promise.all(proms)
       proms = []
     }
@@ -555,6 +560,8 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
       containers_to_restart.delete(c.info.Id)
     }))
   }
+
+  await Promise.all(proms)
 }
 
 
@@ -571,6 +578,7 @@ export async function do_project_backup(opts: DoProjectBackup) {
 
   const is_ssh = opts.repository.includes("@")
   const prune = opts.prune
+  log_value(opts, "prune")
 
   await run_borg_backup_on_project({
     ...opts,
@@ -626,16 +634,20 @@ export async function do_export_tar(opts: DoExportTar) {
 
 /** Stop a container "properly ?" */
 export async function container_stop(container: Docker.Container) {
-  do {
-    // should I kill it at some point ?
-    const infos = await container.inspect()
-    if (infos.State.Running) {
-      console.log(ch.redBright(" ⏹︎ ") + " stopping " + ch.redBright(infos.Name))
-      await container.stop({  })
-    } else {
-      break
-    }
-  } while (true)
+  try {
+    do {
+      // should I kill it at some point ?
+      const infos = await container.inspect()
+      if (infos.State.Running) {
+        console.log(ch.redBright(" ⏹︎ ") + " stopping " + ch.redBright(infos.Name))
+        await container.stop({  })
+      } else {
+        break
+      }
+    } while (true)
+  } finally {
+    // containers_to_stop_and_delete.delete(container.id)
+  }
 }
 
 
@@ -651,11 +663,18 @@ const containers_to_restart = new Set<string>()
 const containers_to_stop_and_delete = new Set<string>()
 
 process.on("uncaughtException", async function (err) {
+  console.error(ch.redBright("entering error mode"))
+  console.error(err)
   for (let c of containers_to_restart) {
-    await container_start(docker.getContainer(c))
+    try {
+      console.error(`trying to restart ${c}`)
+      await container_start(docker.getContainer(c))
+    } finally { containers_to_restart.delete(c) }
   }
   for (let c of containers_to_stop_and_delete) {
-    await container_stop(docker.getContainer(c))
+    try {
+      console.error(`trying to stop ${c}`)
+      await container_stop(docker.getContainer(c))
+    } finally { containers_to_stop_and_delete.delete(c) }
   }
-  console.error(err)
 })

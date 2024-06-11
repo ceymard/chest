@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { version } from "../package.json"
 import { Type, command, flag, option, optional, run, string, subcommands } from "cmd-ts"
-import * as api from "./api"
+import * as api from "./api.js"
 import * as _ch from "chalk"
-import * as helpers from "./helper"
+import * as helpers from "./helper.js"
+import "./monkey.js"
+
+const version = "0.1.0"
 
 import Dockerode from "dockerode"
 import path from "path"
@@ -52,13 +54,6 @@ const opt_container_optional = option({
   short: "c",
   long: "container",
   type: optional(ContainerOption),
-})
-
-
-const archive = option({
-  long: "archive",
-  short: "a",
-  description: "an archive name",
 })
 
 
@@ -130,25 +125,25 @@ const cmd_backup_compose = command({
   version,
   description: "backup a compose project",
   args: {
-    project_name: O("project-name", "the compose project name"),
+    project: O("project-name", "the compose project name"),
     archive: Opt("archive", "an archive name"),
     repository: Opt("repository", "a repository"),
     passphrase: Opt("passphrase", "a passphrase")
   },
   handler: async args => {
 
-    const project_name = args.project_name
+    const project_name = args.project
     const containers = await api.docker.listContainers({
       filters: {
         label: [
-        `com.docker.compose.project=${args.project_name}`
+        `com.docker.compose.project=${args.project}`
         ]
       }
     })
 
     const defs = api.fill_defaults_from_container(containers , config)
     const repository = args.repository ?? path.join(defs.backups_compose_dir, project_name)
-    const archive = args.archive ?? helpers.getTimestamp2()
+    const archive = args.archive ?? `${project_name}-${helpers.getTimestamp2()}`
     const prune = defs.prune
 
     await api.do_project_backup({
@@ -162,6 +157,82 @@ const cmd_backup_compose = command({
       user: config.user,
       group: config.group,
     })
+  }
+})
+
+const cmd_compose_list = command({
+  name: "compose-backup",
+  version,
+  description: "backup all compose projects marked for auto backup",
+  args: {
+    project: O("project", "the compose project name"),
+    passphrase: Opt("passphrase", "a passphrase")
+  },
+  handler: async args => {
+    const containers = await api.docker.listContainers({
+      filters: {
+        label: [`com.docker.compose.project=${args.project}`]
+      }
+    })
+
+    const defs = api.fill_defaults_from_container(containers , config)
+    const repository = defs.repository ?? path.join(defs.backups_compose_dir, args.project)
+
+    await api.run_borg_backup({
+      repository,
+      config,
+      command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
+      stdout(data, id) {
+        for (const arch of data.archives) {
+          console.log(STAR, arch.name, ch.grey(arch.time))
+        }
+      },
+    })
+  }
+})
+
+const cmd_backup_compose_all = command({
+  name: "compose-backup",
+  version,
+  description: "backup all compose projects marked for auto backup",
+  args: {
+    passphrase: Opt("passphrase", "a passphrase")
+  },
+  handler: async args => {
+
+    const all_containers = await api.docker.listContainers({
+      filters: {
+        label: [`com.docker.compose.project`]
+      }
+    })
+
+    const group = Map.groupBy(all_containers, item => item.Labels["com.docker.compose.project"])
+
+    for (const [project_name, containers] of group) {
+      const labels = api.merge_labels(containers)
+
+      if (!labels["chest.auto-backup"]) { continue }
+      console.log(`${STAR} backuping ${ch.bold.bgCyanBright(project_name)}`)
+
+      const defs = api.fill_defaults_from_container(containers , config)
+      const repository = defs.repository ?? path.join(defs.backups_compose_dir, project_name)
+      const archive = `${project_name}-${helpers.getTimestamp2()}`
+      const prune = defs.prune
+      const passphrase = args.passphrase ?? defs.passphrase
+
+      await api.do_project_backup({
+        project_name,
+        containers,
+        archive,
+        prune,
+        config,
+        repository,
+        passphrase,
+        user: config.user,
+        group: config.group,
+      })
+    }
+
   }
 })
 
@@ -436,8 +507,10 @@ const opts = subcommands({
   cmds: {
     backup: cmd_backup,
     "backup-all": cmd_backup_all,
+    "compose-backup-all": cmd_backup_compose_all,
     "compose-extract": cmd_extract_compose,
     "compose-backup": cmd_backup_compose,
+    "compose-list": cmd_compose_list,
     restore: cmd_restore,
     list: cmd_list,
     "restore-compose": cmd_restore_compose,

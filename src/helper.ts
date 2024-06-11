@@ -1,8 +1,8 @@
 import * as fs from "fs"
 import * as readline from "readline"
-import * as es from "event-stream"
+import es from "event-stream"
 import parser from "stream-json"
-import StreamValues from "stream-json/streamers/StreamValues"
+import StreamValues from "stream-json/streamers/StreamValues.js"
 import ch from "chalk"
 // import { Transform } from "stream"
 
@@ -134,7 +134,7 @@ export function getTimestamp() {
 export function getTimestamp2() {
   const d = new Date()
   var pad = (n: number) => n < 10 ? '0' + n : n.toString()
-  return `${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())}-${pad(d.getHours())}.${pad(d.getMinutes())}.${pad(d.getSeconds())}.${d.getMilliseconds()}`
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}h${pad(d.getMinutes())}m${pad(d.getSeconds())}s${d.getMilliseconds()}ms`
 }
 
 
