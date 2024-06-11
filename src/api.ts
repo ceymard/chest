@@ -479,24 +479,27 @@ function figure_out_container_deps(containers: ContainerInspectInfo[]) {
     }
   }
 
+  const res = new Set(items)
+
   function _need(i: FigureOutItem, needs: string) {
     i.needs.add(needs)
     const c = mp.get(needs)
     if (c) {
+      res.delete(c)
+      res.add(c)
       for (let n of c.needs) {
         _need(i, n)
       }
     }
   }
+
   for (let i of items) {
     for (let n of i.needs) {
       _need(i, n)
     }
   }
 
-  items = items.sort((a, b) => {
-    return [...b.provides].some(prov => a.needs.has(prov)) ? 1 : [...a.provides].some(prov => b.needs.has(prov)) ? -1 : 0
-  })
+  items = [...res].reverse()
 
   return items
 }
@@ -555,7 +558,7 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
 
   if (!args.keep_running) {
     // Stop the stack
-    await Promise.all(deps_to_stop.map(dep => {
+    await Promise.all(deps_to_stop.reverse().map(dep => {
       console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright([...dep.provides]))
       containers_to_restart.add(dep.info.Id)
       return new Container(docker.modem, dep.info.Id).stop()
@@ -586,12 +589,13 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
     console.log(ch.greenBright(" ▶ ") + "restarting " + ch.greenBright([...c.provides]))
     // Launch the container, and mark it as active when it is done
     proms.push(cont.start().then(_ => {
+      // give 1s, just in case...
+      return new Promise(acc => setTimeout(acc, 1000))
+    }).then(() => {
       for (let prov of c.provides) {
         active.add(prov)
       }
       containers_to_restart.delete(c.info.Id)
-      // give 1s, just in case...
-      return new Promise(acc => setTimeout(acc, 1000))
     }))
   }
 
