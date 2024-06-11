@@ -226,16 +226,17 @@ export async function run_borg_backup(args: RunBorgOptions & Command) {
       // add the ssh agent socket to the container as well as the env variable
       binds.push(`${process.env.SSH_AUTH_SOCK}:${process.env.SSH_AUTH_SOCK}`)
       env.SSH_AUTH_SOCK = process.env.SSH_AUTH_SOCK
-
-      // mount the current user's .ssh directory to /ssh in the container
-      binds.push(`${os.homedir()}/.ssh:/ssh:ro`)
-
-      // and copy them before running the original command
-      command = `
-      mkdir /root/.ssh ; cp -Rf /ssh/* /root/.ssh/
-      ${command}
-      `
     }
+
+    // mount the current user's .ssh directory to /ssh in the container
+    binds.push(`${os.homedir()}/.ssh:/ssh:ro`)
+
+    // and copy them before running the original command
+    command = `
+    mkdir /root/.ssh ; cp -Rf /ssh/* /root/.ssh/
+    ${command}
+    `
+
   } else if (args.repository) {
     // If not ssh, just bind the repository
     binds.push(`${args.repository}:/repository:rw`)
