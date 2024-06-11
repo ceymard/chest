@@ -1,33 +1,7 @@
 import * as fs from "fs"
 import * as readline from "readline"
-import es from "event-stream"
-import parser from "stream-json"
-import StreamValues from "stream-json/streamers/StreamValues.js"
+import JSONStream from "JSONStream"
 import ch from "chalk"
-// import { Transform } from "stream"
-
-
-
-// const LBRACE = "{".charCodeAt(0)
-// const RBRACE = "}".charCodeAt(0)
-// const COLON = ":".charCodeAt(0)
-// const QUOTE = "\"".charCodeAt(0)
-// const SQUOTE = "\'".charCodeAt(0)
-// const SLASH = "/".charCodeAt(0)
-
-
-// export function jsonParser() {
-//   let buffer = null
-
-//   return new Transform({
-//     transform(chunk: Buffer | string, encoding, callback) {
-//       for (let i = 0, l = chunk.length; i < l; i++) {
-//         const ch = chunk.at(i)
-//       }
-//       callback()
-//     },
-//   })
-// }
 
 
 export function ensure_valid_repository(repo: string) {
@@ -62,18 +36,16 @@ export async function question(prompt: string): Promise<string> {
 
 
 export function jsonStream(out?: (data: any, key: number) => any) {
-  const res = es.pipeline(
-    parser({ jsonStreaming: true }),
-    new StreamValues(),
-    es.mapSync((data: any) => {
-      out?.(data.value, data.key)
-      return data
-    })
-  )
+  const res = new JSONStream.parse()
 
-  // res.on("error", err => {
-  //   console.error(err)
-  // })
+  let i = 0
+  res.on("data", (data: any) => {
+    out?.(data, i++)
+  })
+
+  res.on("error", (err: any) => {
+    console.error(err)
+  })
 
   return res
 }

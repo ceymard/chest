@@ -122,6 +122,7 @@ export interface Args {
 
 async function get_compose(project_name: string, args: Args) {
   const containers = await api.docker.listContainers({
+    all: true,
     filters: {
       label: [
       `com.docker.compose.project=${project_name}`
@@ -210,6 +211,7 @@ const cmd_compose_backup_all = command({
   handler: async args => {
 
     const all_containers = await api.docker.listContainers({
+      all: true,
       filters: {
         label: [`com.docker.compose.project`]
       }
