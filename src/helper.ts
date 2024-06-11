@@ -98,6 +98,15 @@ export function readEtcPasswd() {
 
 const is_tty = process.stderr.hasColors()
 
+function p(stats: any) {
+  if (!stats.nfiles) {
+    return
+  }
+  process.stderr.clearLine(0)
+  process.stderr.cursorTo(0)
+  process.stderr.write(`${ch.magentaBright(" -")} ${formatBytes(stats.deduplicated_size)}/${formatBytes(stats.compressed_size)}/${formatBytes(stats.original_size)} - ${stats.nfiles} files`)
+}
+
 export const stderr_progress = !is_tty ? undefined : function stderr_progress(err: any, key: number) {
   if (err.type === "progress_percent" && !err.finished) {
     process.stderr.clearLine(0)
@@ -107,7 +116,19 @@ export const stderr_progress = !is_tty ? undefined : function stderr_progress(er
     process.stderr.clearLine(0)
     process.stderr.cursorTo(0)
     // process.stderr.write("\n")
+  } else if (err.type === "archive_progress") {
+    process.stderr.clearLine(0)
+    process.stderr.cursorTo(0)
+    p(err)
+    if (err.finished) {
+      process.stderr.write("\n\n")
+    }
+  } else if (err.archive) {
+    const s = err.archive.stats
+    p(s)
+    process.stderr.write("\n")
   }
+
 }
 
 

@@ -166,6 +166,7 @@ export interface RunBorgOptions {
   binds?: string[]
 
   passphrase?: string
+  no_json?: boolean
 
   /** */
   stdout?: (data: any, id: number) => any,
@@ -260,7 +261,7 @@ export async function run_borg_backup(args: RunBorgOptions & Command) {
 
     const stream = await borg.logs({stdout: true, stderr: true, follow: true})
 
-    if (process.env.CHEST_DEBUG) {
+    if (process.env.CHEST_DEBUG || args.no_json) {
       borg.modem.demuxStream(stream, process.stdout, process.stderr) //*/
     } else {
       const stdout = helpers.jsonStream(args.stdout)
@@ -427,6 +428,7 @@ chown -R ${opts.user}:${opts.group} /repository
 export interface RunBorgOnProjectOptions extends RunBorgOptions {
   project_name: string
   containers?: ContainerInfo[]
+  leave_wd?: boolean
 }
 
 
@@ -548,7 +550,6 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
 
     // If it needs containers, wait for them to be relaunched
     if (c.needs.size && [...c.needs].filter(n => !active.has(n))) {
-      console.log("awaiting 2 ?")
       await Promise.all(proms)
       proms = []
     }
@@ -599,15 +600,33 @@ chown -R ${opts.user}:${opts.group} /repository`
 }
 
 export interface DoProjectRestore extends RunBorgOnProjectOptions {
-
+  archive: string
 }
 
 export async function do_project_restore(opts: DoProjectRestore) {
+
+  await run_borg_backup_on_project({
+    ...opts,
+    leave_wd: true, // do not touch
+    command: command_tag`
+cd /data && borg extract --progress --log-json --list -e "__compose__" -v "::${opts.archive}"
+`
+  })
 
 }
 
 export async function do_project_restore_tar(opts: DoProjectRestore) {
 
+  opts.binds ??= []
+  opts.binds.push(`${opts.archive}:/output.tar.xf:ro`)
+
+  await run_borg_backup_on_project({
+    ...opts,
+    leave_wd: true,
+    command: command_tag`
+cd /data && tar xfp /output.tar.xf
+`
+  })
 }
 
 
@@ -628,7 +647,7 @@ export async function do_export_tar(opts: DoExportTar) {
     ...opts,
     repository: opts.repository,
     config: opts.config,
-    command: `borg export-tar "/repository::${opts.archive}" "/output.tar.xf"`,
+    command: `borg export-tar --log-json "/repository::${opts.archive}" "/output.tar.xf"`,
   })
 }
 
