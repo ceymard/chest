@@ -129,6 +129,10 @@ async function get_compose(project_name: string, args: Args) {
     }
   })
 
+  if (!containers?.length) {
+    return null
+  }
+
   const defs = api.fill_defaults_from_container(containers , config)
   const repository = args.repository ?? defs.repository ?? path.join(defs.backups_compose_dir, project_name)
   const archive = args.archive ?? `${project_name}-${helpers.getTimestamp2()}`
@@ -155,6 +159,10 @@ const cmd_compose_backup = command({
     const opts = await get_compose(args.project, {
       ...args,
     })
+
+    if (!opts) {
+      throw new Error("project not found")
+    }
 
     await api.do_project_backup({
       ...opts,
@@ -271,7 +279,7 @@ async function find_out_repository(def: string) {
   const test_project = await get_compose(def, {})
   let repository = def
 
-  if (test_project.containers.length) {
+  if (test_project?.containers.length) {
     return test_project.repository
   }
 
@@ -315,14 +323,7 @@ const cmd_compose_extract = command({
   },
   handler: async args => {
 
-    const def = args.repository_definition
-    const test_project = await get_compose(def, {})
-    let repository = def
-
-    if (test_project.containers.length) {
-      repository = test_project.repository
-    }
-
+    const repository = await find_out_repository(args.repository_definition)
     const archive = args.archive
 
     const binds = [
@@ -350,6 +351,10 @@ const cmd_tar_backup = command({
   },
   async handler(args) {
     const opts = await get_compose(args.project_name, args)
+    if (!opts) {
+      throw new Error("project not found")
+    }
+
     helpers.touch(opts.archive)
 
     api.run_borg_backup_on_project({
@@ -378,6 +383,9 @@ const cmd_tar_restore = command({
   },
   async handler(args) {
     const opts = await get_compose(args.project_name, args)
+    if (!opts) {
+      throw new Error("project not found")
+    }
     api.do_project_restore_tar({
       ...opts,
       config,
@@ -418,6 +426,10 @@ const cmd_compose_restore = command({
   handler: async args => {
 
     const opts = await get_compose(args.project_name, args)
+    if (!opts) {
+      throw new Error("project not found")
+    }
+
     await api.do_project_restore({
       ...opts,
       config,

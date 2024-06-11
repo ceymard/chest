@@ -130,7 +130,7 @@ export function fill_defaults_from_container(infos: ContainerInspectInfo | Conta
   const repository = process.env.BORG_REPOSITORY
     ?? labels["borg.repository"]
     ?? labels["chest.repository"]
-    ?? path.join(config.backups_root_dir, labels["chest.name"] ?? labels["com.docker.compose.project"])
+    ?? path.join(config.backups_root_dir, /*labels["chest.name"] ??*/ labels["com.docker.compose.project"])
 
   const prefix = process.env.CHEST_PREFIX
     ?? labels["chest.prefix"]
@@ -612,6 +612,9 @@ export interface DoProjectRestore extends RunBorgOnProjectOptions {
 }
 
 export async function do_project_restore(opts: DoProjectRestore) {
+  if (!opts.containers?.length) {
+    throw new Error("nope")
+  }
 
   await run_borg_backup_on_project({
     ...opts,
