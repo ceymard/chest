@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import { Type, command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
+import { Type, boolean, command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
 import * as api from "./api.js"
 import * as _ch from "chalk"
 import * as helpers from "./helper.js"
 import "./monkey.js"
 
-const version = "0.1.0"
+// const version = "0.1.0"
 
 import Dockerode from "dockerode"
 import path from "path"
@@ -43,6 +43,10 @@ function Opt(long: string, description?: string) {
   return option({long, short: long[0], description, type: optional(string)})
 }
 
+function OptFlag(long: string, description?: string) {
+  return flag({long, short: long[0], description, type: optional(boolean)})
+}
+
 
 const config = api.read_config()
 
@@ -63,23 +67,6 @@ const opt_container_optional = option({
 })
 
 
-const opt_keep_running = flag({
-  long: "keep-running",
-  description: "do not stop the container from running",
-  type: optional(map((opt: boolean) => {
-    config.keep_running = opt
-    return opt
-  }))
-})
-
-
-const opt_repository = option({
-  long: "repository",
-  short: "r",
-  description: "a path to a repository if not inferring from labels",
-})
-
-
 const opt_repository_optional = option({
   long: "repository",
   short: "r",
@@ -92,12 +79,12 @@ const opt_repository_optional = option({
 
 const cmd_container_backup = command({
   name: "backup",
-  version: version,
+  // version: version,
   description: "backup a container to a borg repository",
   args: {
     container: opt_container_required,
     archive: Opt("archive"),
-    keep_running: opt_keep_running,
+    keep_running: OptFlag("keep-running", "keep the container running"),
     repository: opt_repository_optional,
   },
   handler: async args => {
@@ -129,6 +116,7 @@ export interface Args {
   repository?: string,
   archive?: string,
   passphrase?: string
+  keep_running?: boolean,
 }
 
 
@@ -147,19 +135,20 @@ async function get_compose(project_name: string, args: Args) {
   const prune = defs.prune
   const passphrase = args.passphrase ?? defs.passphrase
 
-  return {project_name, containers, repository, archive, prune, passphrase}
+  return {project_name, containers, repository, archive, prune, passphrase, keep_running: !!args.keep_running}
 }
 
 
 const cmd_compose_backup = command({
   name: "compose-backup",
-  version,
+  // version,
   description: "backup a compose project",
   args: {
     project: P("project-name", "the compose project name"),
     archive: Opt("archive", "an archive name"),
     repository: Opt("repository", "a repository"),
-    passphrase: Opt("passphrase", "a passphrase")
+    passphrase: Opt("passphrase", "a passphrase"),
+    keep_running: OptFlag("keep-running", "keep the containers running instead of shutting them down")
   },
   handler: async args => {
 
@@ -180,7 +169,7 @@ const cmd_compose_backup = command({
 
 const cmd_compose_list = command({
   name: "compose-backup",
-  version,
+  // version,
   description: "backup all compose projects marked for auto backup",
   args: {
     project: P("project", "the compose project name"),
@@ -205,7 +194,7 @@ const cmd_compose_list = command({
 
 const cmd_compose_backup_all = command({
   name: "compose-backup",
-  version,
+  // version,
   description: "backup all compose projects marked for auto backup",
   args: {
     passphrase: Opt("passphrase", "a passphrase")
@@ -252,7 +241,7 @@ const cmd_compose_backup_all = command({
 const cmd_restore = command({
   name: "restore",
   description: "restore a container to a preceding backup",
-  version: version,
+  // version: version,
   args: {
     container: opt_container_required,
     repository: opt_repository_optional,
@@ -280,7 +269,7 @@ const cmd_restore = command({
 
 const cmd_list = command({
   name: "list",
-  version,
+  // version,
   description: "List archives in a repository or a container",
   args: {
     container: opt_container_optional,
@@ -315,7 +304,7 @@ const cmd_list = command({
 
 const cmd_compose_extract = command({
   name: "extract-compose",
-  version,
+  // version,
   description: "extract docker-compose working directory from a backup",
   args: {
     repository_definition: P("repository", "a repository path, or a container with labels, or a project name"),
@@ -350,7 +339,7 @@ const cmd_compose_extract = command({
 
 const cmd_tar_backup = command({
   name: "tar-backup",
-  version,
+  // version,
   description: "restore a project from a tar archive",
   args: {
     project_name: P("project-name", "the compose project to restore"),
@@ -377,7 +366,7 @@ cd /data && tar cfp /output.tar.xf .
 
 const cmd_tar_restore = command({
   name: "tar-restore",
-  version,
+  // version,
   description: "restore a project from a tar archive",
   args: {
     project_name: P("project-name", "the compose project to restore"),
@@ -396,7 +385,7 @@ const cmd_tar_restore = command({
 
 const cmd_tar_export = command({
   name: "export-tar",
-  version,
+  // version,
   description: "export a borg archive to a tarball",
   args: {
     respository: O("repository"),
@@ -416,7 +405,7 @@ const cmd_tar_export = command({
 
 const cmd_compose_restore = command({
   name: "compose-restore",
-  version,
+  // version,
   description: "restore a whole compose project",
   args: {
     project_name: P("project-name", "a compose project name"),
@@ -437,7 +426,7 @@ const cmd_compose_restore = command({
 
 const opts = subcommands({
   name: "chest",
-  version: version,
+  // version: version,
   cmds: {
     "backup-all": cmd_compose_backup_all,
     "backup": cmd_compose_backup,

@@ -428,6 +428,7 @@ chown -R ${opts.user}:${opts.group} /repository
 export interface RunBorgOnProjectOptions extends RunBorgOptions {
   project_name: string
   containers?: ContainerInfo[]
+  keep_running?: boolean
   leave_wd?: boolean
 }
 
@@ -530,16 +531,22 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
   const deps_to_stop = figure_out_container_deps(infos)
     .filter(d => d.running)
 
-  // Stop the stack
-  await Promise.all(deps_to_stop.map(dep => {
-    console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright(dep.provides))
-    containers_to_restart.add(dep.info.Id)
-    return new Container(docker.modem, dep.info.Id).stop()
-  }))
+  if (!args.keep_running) {
+    // Stop the stack
+    await Promise.all(deps_to_stop.map(dep => {
+      console.log(ch.redBright(" ⏹︎ ") + "stopping " + ch.redBright(dep.provides))
+      containers_to_restart.add(dep.info.Id)
+      return new Container(docker.modem, dep.info.Id).stop()
+    }))
+  }
 
   // Run borg-backup
   console.log(STAR, "running borg")
   await run_borg_backup(args)
+
+  if (args.keep_running) {
+    return
+  }
 
   // Relaunch the stack
   let proms: Promise<any>[] = []
