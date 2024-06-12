@@ -177,19 +177,20 @@ const cmd_compose_backup = command({
 
 
 const cmd_compose_list = command({
-  name: "compose-backup",
+  name: "compose-list",
   // version,
   description: "backup all compose projects marked for auto backup",
   args: {
-    project: P("project", "the compose project name"),
+    project: P("project", "the compose project name or a repository"),
     passphrase: Opt("passphrase", "a passphrase"),
-    repository: Opt("repository", "a borg backup repository"),
   },
   handler: async args => {
-    const opts = await get_compose(args.project, args)
+    const repo = await find_out_repository(args.project)
 
     await api.run_borg_backup({
-      ...opts,
+      // ...opts,
+      repository: repo,
+      passphrase: args.passphrase,
       config,
       command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
       stdout(data, id) {
@@ -404,16 +405,16 @@ const cmd_tar_export = command({
   // version,
   description: "export a borg archive to a tarball",
   args: {
-    respository: O("repository"),
+    repository: O("repository"),
     archive: O("archive"),
-    output: O("output"),
+    tarpath: O("output"),
+    passphrase: Opt("passphrase"),
   },
   handler: async args => {
-    api.do_export_tar({
-      archive: args.archive,
+    await api.do_export_tar({
+      ...args,
       config,
-      repository: args.respository,
-      tarpath: args.output,
+      stderr: helpers.stderr_progress,
     })
   },
 })

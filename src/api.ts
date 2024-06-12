@@ -581,7 +581,7 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
     const cont = new Container(docker.modem, c.info.Id)
 
     // If it needs containers, wait for them to be relaunched
-    if (c.needs.size && [...c.needs].filter(n => !active.has(n))) {
+    if (c.needs.size && [...c.needs].filter(n => !active.has(n)).length > 0) {
       await Promise.all(proms)
       proms = []
     }
@@ -681,14 +681,12 @@ export interface DoExportTar extends RunBorgOptions {
 export async function do_export_tar(opts: DoExportTar) {
 
   opts.binds ??= []
-  opts.binds.push(`${opts.tarpath}:/output.tar.xf:rw`)
+  opts.binds.push(`${path.join(process.cwd(), opts.tarpath)}:/output.tar.xf:rw`)
   helpers.touch(opts.tarpath)
 
   await run_borg_backup({
     ...opts,
-    repository: opts.repository,
-    config: opts.config,
-    command: `borg export-tar --log-json "/repository::${opts.archive}" "/output.tar.xf"`,
+    command: `borg export-tar --log-json "::${opts.archive}" "/output.tar.xf"`,
   })
 }
 
