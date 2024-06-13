@@ -68,7 +68,7 @@ export function readEtcPasswd() {
   return passwd
 }
 
-const is_tty = process.stderr.hasColors()
+const is_tty = process.stderr?.hasColors?.()
 
 function p(stats: any) {
   if (!stats.nfiles) {
