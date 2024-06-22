@@ -433,6 +433,7 @@ export interface RunBorgOnProjectOptions extends RunBorgOptions {
   containers?: ContainerInfo[]
   keep_running?: boolean
   leave_wd?: boolean
+  services?: string
 }
 
 
@@ -522,9 +523,21 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
 
   let working_dir: string | null = null
 
+  const services_map = args.services ? new Map<string, string>() : null
+  if (args.services && services_map) {
+    const srv = args.services.split(/,/g).map(s => s.split(/:/g).map(s => s.trim()))
+
+    for (let [src, dst] of srv) {
+      if (!dst) {
+        dst = src
+      }
+      services_map.set(dst, src)
+    }
+  }
+
   for (let c of infos) {
 
-    const service = c.Config.Labels["com.docker.compose.service"]
+    let service = c.Config.Labels["com.docker.compose.service"]
 
     // We add the compose working dir if there was one
     if (!working_dir) {
@@ -536,8 +549,18 @@ export async function run_borg_backup_on_project(args: RunBorgOnProjectOptions &
       }
     }
 
+    if (services_map) {
+      const dst = services_map.get(service)
+      if (!dst) {
+        continue
+      }
+
+      service = dst
+    }
+
     const c2 = new Container(docker.modem, c.Id)
     const inspect = await c2.inspect()
+
     // Put all the mounts of the service into /data/<service>/<destination>
     // we exclude those that were inside the working directory of the project
     args.binds.push(
@@ -639,6 +662,7 @@ chown -R ${opts.user}:${opts.group} /repository`
 
 export interface DoProjectRestore extends RunBorgOnProjectOptions {
   archive: string
+  services?: string
 }
 
 export async function do_project_restore(opts: DoProjectRestore) {

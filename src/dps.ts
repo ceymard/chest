@@ -24,6 +24,7 @@ interface ContainerInfos {
   urls: string[]
   backuped: boolean
   backupName: string
+  ovh: string
   volumes: {inside: string, local: string, rw: boolean, type: "bind" | "volume"}[]
 }
 
@@ -37,7 +38,7 @@ function display(c: ContainerInfos, opts: Options): string[] {
   if (opts.urls) {
     if (!c.urls.length) return []
     for (let u of c.urls) {
-      out.write(ch.cyan(`🌐 https://${u} ${ch.gray(c.compose)} ${ch.gray(c.name)}\n`))
+      out.write(ch.cyan(`🌐 https://${u} ${ch.gray(c.compose)} ${ch.gray(c.name)}${c.ovh ? " dyndns":""}\n`))
     }
     return []
   }
@@ -117,6 +118,7 @@ async function run(options: Options) {
       volumes: cf.Mounts.map(mount => ({ inside: mount.Destination, local: mount.Source, rw: mount.RW, type: (mount as any).Type })),
       backuped: !!labels['chest.auto-backup'],
       backupName: labels["chest.name"],
+      ovh: labels["com.ovh.dyndns-update"],
       urls,
       ips,
       ports: cont.Ports.map(p => ({ public: !!p.PublicPort, host: p.PublicPort, local: p.PrivatePort, type: p.Type, ip: p.IP })),

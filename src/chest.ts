@@ -20,13 +20,6 @@ const ContainerOption: Type<string, Dockerode.Container> = {
   }
 }
 
-function map<R = string, T = R>(fn: (val: T) => R): Type<T, R> {
-  return {
-    async from(input: T) {
-      return fn(input)
-    }
-  }
-}
 
 function P(name: string, description?: string) {
   return positional({
@@ -58,13 +51,6 @@ const opt_container_required = option({
   type: ContainerOption,
 })
 
-
-const opt_container_optional = option({
-  description: "a container name",
-  short: "c",
-  long: "container",
-  type: optional(ContainerOption),
-})
 
 
 const opt_repository_optional = option({
@@ -189,8 +175,8 @@ const cmd_compose_list = command({
 
     await api.run_borg_backup({
       // ...opts,
-      repository: repo,
-      passphrase: args.passphrase,
+      repository: repo.repository,
+      passphrase: args.passphrase ?? repo.passphrase,
       config,
       command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
       stdout(data, id) {
@@ -279,17 +265,17 @@ const cmd_restore = command({
 })
 
 
-async function find_out_repository(def: string) {
+async function find_out_repository(def: string): Promise<NonNullable<Partial<Awaited<ReturnType<typeof get_compose>>>>> {
   const test_project = await get_compose(def, {})
   let repository = def
 
   if (test_project?.containers.length) {
-    return test_project.repository
+    return {...test_project}
   }
 
-  const cnt = api.docker.getContainer(def)
+  // const cnt = api.docker.getContainer(def)
 
-  return repository
+  return {repository}
 }
 
 
@@ -304,7 +290,7 @@ const cmd_list = command({
     let repository = await find_out_repository(args.repository)
 
     await api.run_borg_backup({
-      repository,
+      repository: repository.repository,
       config,
       command: api.command_tag`borg list --json --log-json --format="{archive}{NL}" ::`,
       stdout(data, id) {
@@ -338,7 +324,7 @@ const cmd_compose_extract = command({
     await api.run_borg_backup({
       command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v --pattern=+__compose__ '--pattern=-**/*' "::${archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -Rfp /cwd2/__compose__/* /cwd/ 2>/dev/null`,
       config,
-      repository,
+      repository: repository.repository,
       passphrase: args.passphrase,
       binds,
     })
@@ -428,6 +414,7 @@ const cmd_compose_restore = command({
     project_name: P("project-name", "a compose project name"),
     repository: opt_repository_optional,
     archive: P("archive", "the archive name to restore to"),
+    services: Opt("services", "a specific service to limit restoration to"),
     passphrase: Opt("passphrase", "a passphrase"),
   },
   handler: async args => {
