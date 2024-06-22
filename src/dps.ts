@@ -89,15 +89,9 @@ async function run(options: Options) {
   const re_filter = options.filter ? new RegExp(options.filter, "i") : null
 
   for (let cont of containers) {
-    if (re_filter && !re_filter.test(cont.Names.join(" "))) continue
 
-    const ct = await d.getContainer(cont.Id)
+    const ct = d.getContainer(cont.Id)
     const cf = await ct.inspect()
-
-    const labels = cont.Labels
-
-    const ips = Object.values(cont.NetworkSettings.Networks).map(net => net.IPAddress.trim()).filter(d => !!d)
-
     const urls: string[] = []
     for (let e of cf.Config.Env) {
       if (e.match(/^VIRTUAL_HOST/)) {
@@ -105,6 +99,12 @@ async function run(options: Options) {
         urls.push(...e.split(/,/g))
       }
     }
+
+    if (re_filter && !re_filter.test(cont.Names.join(" ")) && !re_filter.test(urls.join(" "))) continue
+
+    const labels = cont.Labels
+
+    const ips = Object.values(cont.NetworkSettings.Networks).map(net => net.IPAddress.trim()).filter(d => !!d)
 
     infos.push({
       image: cont.Image,
