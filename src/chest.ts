@@ -1,5 +1,16 @@
 #!/usr/bin/env node
-import { Type, boolean, command, flag, option, optional, positional, run, string, subcommands } from "cmd-ts"
+import {
+  Type,
+  boolean,
+  command,
+  flag,
+  option,
+  optional,
+  positional,
+  run,
+  string,
+  subcommands,
+} from "cmd-ts"
 import * as api from "./api.js"
 import * as _ch from "chalk"
 import * as helpers from "./helper.js"
@@ -13,13 +24,13 @@ import path from "path"
 const ch = new _ch.Chalk()
 const STAR = ch.greenBright(" *")
 
-
 const ContainerOption: Type<string, Dockerode.Container> = {
   async from(input: string) {
-    return api.docker.getContainer(input.replace(/^\//, "").replace(/\.docker$/, ""))
-  }
+    return api.docker.getContainer(
+      input.replace(/^\//, "").replace(/\.docker$/, "")
+    )
+  },
 }
-
 
 function P(name: string, description?: string) {
   return positional({
@@ -29,20 +40,18 @@ function P(name: string, description?: string) {
 }
 
 function O(long: string, description?: string) {
-  return option({long, short: long[0], description})
+  return option({ long, short: long[0], description })
 }
 
 function Opt(long: string, description?: string) {
-  return option({long, short: long[0], description, type: optional(string)})
+  return option({ long, short: long[0], description, type: optional(string) })
 }
 
 function OptFlag(long: string, description?: string) {
-  return flag({long, short: long[0], description, type: optional(boolean)})
+  return flag({ long, short: long[0], description, type: optional(boolean) })
 }
 
-
 const config = api.read_config()
-
 
 const opt_container_required = option({
   description: "a container name",
@@ -50,8 +59,6 @@ const opt_container_required = option({
   long: "container",
   type: ContainerOption,
 })
-
-
 
 const opt_repository_optional = option({
   long: "repository",
@@ -61,7 +68,6 @@ const opt_repository_optional = option({
 })
 
 ////////////////////////////////////////////////////
-
 
 const cmd_container_backup = command({
   name: "backup",
@@ -73,9 +79,11 @@ const cmd_container_backup = command({
     keep_running: OptFlag("keep-running", "keep the container running"),
     repository: opt_repository_optional,
   },
-  handler: async args => {
-
-    const defs = api.fill_defaults_from_container(await args.container.inspect(), config)
+  handler: async (args) => {
+    const defs = api.fill_defaults_from_container(
+      await args.container.inspect(),
+      config
+    )
 
     const repository = args.repository ?? defs.repository
     const archive = args.archive ?? defs.archive
@@ -94,41 +102,47 @@ const cmd_container_backup = command({
       user: config.user,
       group: config.group,
     })
-  }
+  },
 })
 
-
 export interface Args {
-  repository?: string,
-  archive?: string,
+  repository?: string
+  archive?: string
   passphrase?: string
-  keep_running?: boolean,
+  keep_running?: boolean
 }
-
 
 async function get_compose(project_name: string, args: Args) {
   const containers = await api.docker.listContainers({
     all: true,
     filters: {
-      label: [
-      `com.docker.compose.project=${project_name}`
-      ]
-    }
+      label: [`com.docker.compose.project=${project_name}`],
+    },
   })
 
   if (!containers?.length) {
     return null
   }
 
-  const defs = api.fill_defaults_from_container(containers , config)
-  const repository = args.repository ?? defs.repository ?? path.join(defs.backups_compose_dir, project_name)
+  const defs = api.fill_defaults_from_container(containers, config)
+  const repository =
+    args.repository ??
+    defs.repository ??
+    path.join(defs.backups_compose_dir, project_name)
   const archive = args.archive ?? `${project_name}-${helpers.getTimestamp2()}`
   const prune = defs.prune
   const passphrase = args.passphrase ?? defs.passphrase
 
-  return {project_name, containers, repository, archive, prune, passphrase, keep_running: !!args.keep_running}
+  return {
+    project_name,
+    containers,
+    repository,
+    archive,
+    prune,
+    passphrase,
+    keep_running: !!args.keep_running,
+  }
 }
-
 
 const cmd_compose_backup = command({
   name: "compose-backup",
@@ -139,10 +153,12 @@ const cmd_compose_backup = command({
     archive: Opt("archive", "an archive name"),
     repository: Opt("repository", "a repository"),
     passphrase: Opt("passphrase", "a passphrase"),
-    keep_running: OptFlag("keep-running", "keep the containers running instead of shutting them down")
+    keep_running: OptFlag(
+      "keep-running",
+      "keep the containers running instead of shutting them down"
+    ),
   },
-  handler: async args => {
-
+  handler: async (args) => {
     const opts = await get_compose(args.project, {
       ...args,
     })
@@ -158,9 +174,8 @@ const cmd_compose_backup = command({
       group: config.group,
       stderr: helpers.stderr_progress,
     })
-  }
+  },
 })
-
 
 const cmd_compose_list = command({
   name: "compose-list",
@@ -170,7 +185,7 @@ const cmd_compose_list = command({
     project: P("project", "the compose project name or a repository"),
     passphrase: Opt("passphrase", "a passphrase"),
   },
-  handler: async args => {
+  handler: async (args) => {
     const repo = await find_out_repository(args.project)
 
     await api.run_borg_backup({
@@ -185,7 +200,7 @@ const cmd_compose_list = command({
         }
       },
     })
-  }
+  },
 })
 
 const cmd_compose_backup_all = command({
@@ -193,27 +208,34 @@ const cmd_compose_backup_all = command({
   // version,
   description: "backup all compose projects marked for auto backup",
   args: {
-    passphrase: Opt("passphrase", "a passphrase")
+    passphrase: Opt("passphrase", "a passphrase"),
   },
-  handler: async args => {
-
+  handler: async (args) => {
     const all_containers = await api.docker.listContainers({
       all: true,
       filters: {
-        label: [`com.docker.compose.project`]
-      }
+        label: [`com.docker.compose.project`],
+      },
     })
 
-    const group = Map.groupBy(all_containers, item => item.Labels["com.docker.compose.project"])
+    const group = Map.groupBy(
+      all_containers,
+      (item) => item.Labels["com.docker.compose.project"]
+    )
 
     for (const [project_name, containers] of group) {
       const labels = api.merge_labels(containers)
 
-      if (!labels["chest.auto-backup"]) { continue }
-      console.log(`${STAR} backuping ${ch.bold.bgCyanBright.redBright(project_name)}`)
+      if (!labels["chest.auto-backup"]) {
+        continue
+      }
+      console.log(
+        `${STAR} backuping ${ch.bold.bgCyanBright.redBright(project_name)}`
+      )
 
-      const defs = api.fill_defaults_from_container(containers , config)
-      const repository = defs.repository ?? path.join(defs.backups_compose_dir, project_name)
+      const defs = api.fill_defaults_from_container(containers, config)
+      const repository =
+        defs.repository ?? path.join(defs.backups_compose_dir, project_name)
       const archive = `${project_name}-${helpers.getTimestamp2()}`
       const prune = defs.prune
       const passphrase = args.passphrase ?? defs.passphrase
@@ -231,10 +253,8 @@ const cmd_compose_backup_all = command({
         stderr: helpers.stderr_progress,
       })
     }
-
-  }
+  },
 })
-
 
 const cmd_restore = command({
   name: "restore",
@@ -246,11 +266,11 @@ const cmd_restore = command({
     archive: option({
       description: "the archive name",
       short: "a",
-      long: "archive"
+      long: "archive",
       // displayName: "archive",
-    })
+    }),
   },
-  handler: async args => {
+  handler: async (args) => {
     const infos = await args.container.inspect()
     const defs = api.fill_defaults_from_container(infos, config)
 
@@ -261,23 +281,23 @@ const cmd_restore = command({
       config,
       repository: args.repository ?? defs.repository,
     })
-  }
+  },
 })
 
-
-async function find_out_repository(def: string): Promise<NonNullable<Partial<Awaited<ReturnType<typeof get_compose>>>>> {
+async function find_out_repository(
+  def: string
+): Promise<NonNullable<Partial<Awaited<ReturnType<typeof get_compose>>>>> {
   const test_project = await get_compose(def, {})
   let repository = def
 
   if (test_project?.containers.length) {
-    return {...test_project}
+    return { ...test_project }
   }
 
   // const cnt = api.docker.getContainer(def)
 
-  return {repository}
+  return { repository }
 }
-
 
 const cmd_list = command({
   name: "list",
@@ -286,7 +306,7 @@ const cmd_list = command({
   args: {
     repository: P("repository", "a repo description"),
   },
-  handler: async args => {
+  handler: async (args) => {
     let repository = await find_out_repository(args.repository)
 
     await api.run_borg_backup({
@@ -299,27 +319,29 @@ const cmd_list = command({
         }
       },
     })
-  }
+  },
 })
-
 
 const cmd_compose_extract = command({
   name: "extract-compose",
   // version,
   description: "extract docker-compose working directory from a backup",
   args: {
-    repository_definition: P("repository", "a repository path, or a container with labels, or a project name"),
-    archive: P("archive", "the archive name containing the wanted compose files"),
-    passphrase: Opt("passphrase", "a passphrase")
+    repository_definition: P(
+      "repository",
+      "a repository path, or a container with labels, or a project name"
+    ),
+    archive: P(
+      "archive",
+      "the archive name containing the wanted compose files"
+    ),
+    passphrase: Opt("passphrase", "a passphrase"),
   },
-  handler: async args => {
-
+  handler: async (args) => {
     const repository = await find_out_repository(args.repository_definition)
     const archive = args.archive
 
-    const binds = [
-      `${process.cwd()}:/cwd:rw`,
-    ]
+    const binds = [`${process.cwd()}:/cwd:rw`]
 
     await api.run_borg_backup({
       command: api.command_tag`mkdir /cwd2 && cd /cwd2 && borg --show-version extract --noacls --noxattrs --progress --log-json --list -v --pattern=+__compose__ '--pattern=-**/*' "::${archive}" && chown ${config.user}:${config.group} /cwd2/* && cp -Rfp /cwd2/__compose__/* /cwd/ 2>/dev/null`,
@@ -328,10 +350,8 @@ const cmd_compose_extract = command({
       passphrase: args.passphrase,
       binds,
     })
-
-  }
+  },
 })
-
 
 const cmd_tar_backup = command({
   name: "tar-backup",
@@ -352,17 +372,14 @@ const cmd_tar_backup = command({
     api.run_borg_backup_on_project({
       ...opts,
       config,
-      binds: [
-        `${args.archive}:/output.tar.xf:rw`,
-      ],
+      binds: [`${args.archive}:/output.tar.xf:rw`],
       no_json: true,
       command: api.command_tag`
 cd /data && tar cfp /output.tar.xf .
-`
+`,
     })
   },
 })
-
 
 const cmd_tar_restore = command({
   name: "tar-restore",
@@ -385,7 +402,6 @@ const cmd_tar_restore = command({
   },
 })
 
-
 const cmd_tar_export = command({
   name: "export-tar",
   // version,
@@ -396,7 +412,7 @@ const cmd_tar_export = command({
     tarpath: O("output"),
     passphrase: Opt("passphrase"),
   },
-  handler: async args => {
+  handler: async (args) => {
     await api.do_export_tar({
       ...args,
       config,
@@ -404,7 +420,6 @@ const cmd_tar_export = command({
     })
   },
 })
-
 
 const cmd_compose_restore = command({
   name: "compose-restore",
@@ -417,8 +432,7 @@ const cmd_compose_restore = command({
     services: Opt("services", "a specific service to limit restoration to"),
     passphrase: Opt("passphrase", "a passphrase"),
   },
-  handler: async args => {
-
+  handler: async (args) => {
     const opts = await get_compose(args.project_name, args)
     if (!opts) {
       throw new Error("project not found")
@@ -429,18 +443,17 @@ const cmd_compose_restore = command({
       config,
       stderr: helpers.stderr_progress,
     })
-  }
+  },
 })
-
 
 const opts = subcommands({
   name: "chest",
   // version: version,
   cmds: {
     "backup-all": cmd_compose_backup_all,
-    "backup": cmd_compose_backup,
-    "list": cmd_compose_list,
-    "restore": cmd_compose_restore,
+    backup: cmd_compose_backup,
+    list: cmd_compose_list,
+    restore: cmd_compose_restore,
     "extract-compose": cmd_compose_extract,
     "container-backup": cmd_container_backup,
     // "container-backup-all": cmd_backup_all,
