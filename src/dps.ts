@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 import Docker from 'dockerode'
 // import col from 'colors/safe'
 import ch from "chalk"

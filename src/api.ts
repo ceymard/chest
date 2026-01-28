@@ -42,6 +42,8 @@ export function command_tag(tpl: TemplateStringsArray, ...values: string[]) {
   return res.join("")
 }
 
+export const BORG_IMAGE = "ceymard/borg:1.2.8"
+
 /** The config class to get some defaults. */
 export class ChestConfig {
   @s.str user = current_user.username
@@ -51,7 +53,7 @@ export class ChestConfig {
   @s.str backups_compose_dir = this.backups_root_dir
   @s.str passphrase?: string
   @s.str prune = "--keep-daily 7 --keep-weekly 2 --keep-monthly 1"
-  @s.str borg_image = "ceymard/borg:1.2.8"
+  @s.str borg_image = BORG_IMAGE
 
   archive = ""
   keep_running = false
@@ -206,6 +208,8 @@ export interface Command {
 export async function run_borg_backup(args: RunBorgOptions & Command) {
   log_value(args, "repository")
 
+  await ensure_borg_backup_available()
+
   // We're not going to do to the same thing
   const repo_is_ssh = args.repository?.includes("@")
 
@@ -331,10 +335,44 @@ export interface RunBorgOnContainerOptions extends RunBorgOptions {
   infos: Dockerode.ContainerInspectInfo
 }
 
+export async function ensure_borg_backup_available() {
+  try {
+    await docker.getImage(BORG_IMAGE).inspect()
+    return
+  } catch {
+    console.error("pulling borg backup image", BORG_IMAGE)
+    return new Promise((resolve, reject) => {
+      docker.pull(BORG_IMAGE, (err: any, stream: any) => {
+        if (err) return reject(err);
+
+        docker.modem.followProgress(
+          stream,
+          onFinished,
+          onProgress
+        );
+
+        function onFinished(err: any, output: any) {
+          if (err) return reject(err);
+          resolve(output);
+        }
+
+        function onProgress(event: any) {
+          // Optional: log progress
+          // console.log(event);
+        }
+      })
+    })
+  }
+}
+
 /** */
 export async function run_borg_backup_on_container(
   args: RunBorgOnContainerOptions & Command
 ) {
+
+  // ensure borg backup is available
+  await ensure_borg_backup_available()
+
   args.binds ??= []
 
   args.binds.push(
