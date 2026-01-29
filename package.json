@@ -8,7 +8,7 @@
   },
   "bin": {
     "chest": "src/chest.ts",
-    "dps": "src/dps.tss"
+    "dps": "src/dps.ts"
   },
   "scripts": {
     "build": "tsc | wtsc",
