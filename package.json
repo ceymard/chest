@@ -3,7 +3,6 @@
   "version": "0.5.12",
   "type": "module",
   "engines": {
-    "node": ">=14.0.0",
     "bun": ">=1.0.0"
   },
   "bin": {
